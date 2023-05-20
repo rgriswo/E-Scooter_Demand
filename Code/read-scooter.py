@@ -22,7 +22,7 @@ METROS = {'kansas': {'data': "Kansas-Microtransit__Scooter_and_Ebike__Trips.csv"
                       'map':  "Kansas-map2.png",
                       'bbox': (-94.8560, -94.3000, 38.8)}}
 
-CITY  = 'norfolk'
+CITY  = 'kansas'
      
 class BoundBox():
     def __init__(self, lat, lon, delta=0.001):
