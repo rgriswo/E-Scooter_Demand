@@ -43,11 +43,11 @@ def download_file(url, target, md5=None):
             
     if md5 == None or check_integrity(target, md5):         
         n = os.path.getsize(target)
-        print("\nThe file is in good condition (%d bytes)" % n)
-    else:
-        print("\nThe file has some problem\n", target)
-
-    return 
+        print("The file '%s' is available (%d bytes)" % (target, n))
+        return True
+    
+    print("\nThe file has some problem\n", target)
+    return False
             
 data_db = {'kansas-scooter': 
               {'addr':"http://et.engr.iupui.edu/~dskim/downloadable/data/", 
@@ -60,17 +60,25 @@ data_db = {'kansas-scooter':
                'md5': 'de155a9f3cd9cc434cf49a6d104d3c0e'
               }
           }
+    
+def ev_catalog():
+    return list(data_db.keys())
 
-destin_path = r"C:\Users\dskim\Documents\Data\scooter"
-
-# key = "kansas-scooter"
-key = "indianapolis-scooter"
-source = os.path.join(data_db[key]['addr'], data_db[key]['name'])
-destin = os.path.join(destin_path, data_db[key]['name'])
-
-print(source)
-print(destin)
-print(data_db[key]['md5'])
-download_file(source, destin, data_db[key]['md5'])
-
-            
+def ev_download(key, target_path):
+    if key in ev_catalog():
+        source = os.path.join(data_db[key]['addr'], data_db[key]['name'])
+        destin = os.path.join(target_path, data_db[key]['name'])
+        # print(source)
+        # print(destin)
+        # print(data_db[key]['md5'])
+        rval = download_file(source, destin, data_db[key]['md5'])
+        return rval
+    else:
+        return False
+        
+if __name__ == '__main__':    
+    destin_path = r"C:\Users\dskim\Documents\Data\scooter"
+    key = "kansas-scooter"
+#    key = "indianapolis-scooter"    
+    ev_download(key, destin_path)
+      
