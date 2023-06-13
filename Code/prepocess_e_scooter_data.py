@@ -27,11 +27,12 @@ RADIUS = 0.3
 #earh's circumference in meters
 EARTH_CIRCUM = 40000000
 #gid size in meters 
-GRID_SIZE = 500
+GRID_SIZE = 250
 #Time_increments in seconds (1 hour = 3600 seconds)
 TIME_INCREMENT = 3600
 TIME_OFFSET = 0
 GRID_DICT = {}
+DEMAND_CUTOFF = 100
 #############################################
 
 def lat_lon_to_x_y(lat,lon):
@@ -47,16 +48,18 @@ def lat_lon_to_x_y(lat,lon):
       
       #if its the first grid location add it to dictionary
       if len(GRID_DICT) == 0:
-          GRID_DICT[x_y] = 0
-          return 0
+          GRID_DICT[x_y] = [0,1]
+          return GRID_DICT[x_y][0]
       
       #if x and y has already been assinged a number return number
       if x_y in GRID_DICT:
-          return GRID_DICT[x_y]
+          GRID_DICT[x_y][1] = GRID_DICT[x_y][1] + 1
+          return GRID_DICT[x_y][0]
       #else assigned x and y a new number and add it to dictionary
-      else: 
-          GRID_DICT[x_y] = max(GRID_DICT.values()) + 1
-          return GRID_DICT[x_y]
+      else:
+          max_unique_id = max([item[0] for item in GRID_DICT.values()])
+          GRID_DICT[x_y] = [max_unique_id + 1,1]
+          return GRID_DICT[x_y][0]
 
 # def lat_lon_to_x_y(lat,lon):
 #         print((lat- MIN_LAT)/RADIUS)
@@ -131,7 +134,32 @@ def build_grid_database(df):
     #rename columns
     df.rename(columns = rename_columns, inplace=True)
     
-    df.drop(columns=[hd.start_lon, hd.end_lon], axis=1, inplace=True)                
+    global GRID_DICT, MAP_DICT
+    
+    #get high demands cells
+    keys = np.array(tuple(GRID_DICT.keys()))
+    
+    unique_id = np.array([item[0] for item in GRID_DICT.values()])
+    
+    demand_count = np.array([item[1] for item in GRID_DICT.values()])
+    
+    high_demand_mask = (demand_count >= DEMAND_CUTOFF)
+    
+    high_demand_ids = unique_id[high_demand_mask]
+    
+    high_demand_keys = keys[high_demand_mask]
+    
+    #update dictionary to only include high demand cells
+    GRID_DICT = dict((tuple(k),GRID_DICT[tuple(k)]) for k in high_demand_keys)
+    
+    
+    #filter out cells without high demands
+    for col in x_y_col:
+        df = df[list((i in high_demand_ids for i in df[col]))]
+    
+    df.drop(columns=[hd.start_lon, hd.end_lon], axis=1, inplace=True)  
+
+    return df              
 
     
     
@@ -147,6 +175,7 @@ def create_time_groups(df):
     
     #create dict for rename columns
     rename_columns  = dict(zip(time_cols, group_time_col))
+
     
     #rename columns
     df.rename(columns = rename_columns, inplace=True)
@@ -154,7 +183,9 @@ def create_time_groups(df):
 def create_trip_db(df):
     odlist = []
     
-    matrix_dim = lat_lon_to_x_y(MAX_LAT,MAX_LON)
+    id_list = [item[0] for item in GRID_DICT.values()]
+    
+    matrix_dim = len(id_list)
     matrix_dim = (matrix_dim, matrix_dim)
     
     #sort data by time groups
@@ -179,8 +210,8 @@ def create_trip_db(df):
         while (df['start_time_group'][current_pandas_index] == i):
             
             #get x and y
-            x = df['start'][current_pandas_index]
-            y = df['end'][current_pandas_index]
+            x = id_list.index(df['start'][current_pandas_index])
+            y = id_list.index(df['end'][current_pandas_index])
             
 
             #increment cell demand for x and y coordinates
@@ -202,7 +233,7 @@ def main():
     df_scooter_data = pd.read_csv(FILE_PATH,sep=',')
     
     #update global TIME_OFFSET
-    global TIME_OFFSET  
+    global TIME_OFFSET , database 
         
     TIME_OFFSET =  date_to_seconds_since_epoch(df_scooter_data[hd.start_time][0])
     
@@ -222,7 +253,7 @@ def main():
     #set min and max lat lons 
     set_min_max_lat_lon(lat, lon)
     
-    build_grid_database(df_filtered)
+    df_filtered = build_grid_database(df_filtered)
     
     print("finished grid database")
     
@@ -234,11 +265,13 @@ def main():
     
     df_filtered.to_csv("out.csv", index = False)
     
-    data = {'row_1': GRID_DICT.keys(), 'row_2': GRID_DICT.values()}
+    row2 = [item[0] for item in GRID_DICT.values()]
+    row3 = [item[1] for item in GRID_DICT.values()]
+    data = {'row_1': GRID_DICT.keys(), 'row_2': row2, 'row_3': row3}
     
     pd.DataFrame.from_dict(data).to_csv("grid_dict.csv", index = False)
     
-    with open('test3.pkl', 'wb') as sout:
+    with open('e_scooter_high_demand.pkl', 'wb') as sout:
         pickle.dump(trip_db, sout, pickle.HIGHEST_PROTOCOL)
     
     
