@@ -4,7 +4,8 @@ Created on Sat May 13 18:37:53 2023
 
 @author: Ryan's computer
 """
-
+import sys
+sys.path.insert(0, 'C:\\Users\\ryang\\Desktop\\E_Scooter_Demand\\E-Scooter_Demand\Code') # location of src 
 import pandas as pd
 import header_names as hd
 import math 
@@ -143,7 +144,8 @@ def build_grid_database(df):
     
     demand_count = np.array([item[1] for item in GRID_DICT.values()])
     
-    high_demand_mask = (demand_count >= DEMAND_CUTOFF)
+    #high_demand_mask = (demand_count >= DEMAND_CUTOFF)
+    high_demand_mask = (abs(stats.zscore(demand_count) < 3))
     
     high_demand_ids = unique_id[high_demand_mask]
     
@@ -225,9 +227,19 @@ def create_trip_db(df):
         odlist.append(coo)
         
     return odlist
+
+       
+def normalize_trip_db(db):  
+    MIN = 0
+    MAX = 0
+    #find max of all matrixs
+    for matrix in db:
+        if len(matrix.data) > 0 and MAX < max(matrix.data):
+            MAX = max(matrix.data)
+    
+    for matrix in db:
+        matrix.data = (matrix.data - MIN)/(MAX - MIN)
             
-    
-    
 def main():  
     
     df_scooter_data = pd.read_csv(FILE_PATH,sep=',')
@@ -262,6 +274,12 @@ def main():
     print("finished time groups database")
     
     trip_db = create_trip_db(df_filtered)
+    
+    print("Created trib db")
+    
+    normalize_trip_db(trip_db)
+    
+    print("finshed normalizing data")
     
     df_filtered.to_csv("out.csv", index = False)
     
