@@ -17,16 +17,20 @@ from tqdm import tqdm
 
 
 
+
+
 SCOOTER_DATA = "C:\\Users\\ryang\\Desktop\\E_Scooter_Demand\\E-Scooter_Demand\\Code\\e_scooter_high_demand.pkl"
-MODEL_FILE = 'escooter_model-v2.pt'
-BATCH_SIZE = 11
-EPOCHS = 100
-WINDOWSIZE = 12
+MODEL_FILE = 'C:\\Users\\ryang\\Desktop\\E_Scooter_Demand\\E-Scooter_Demand\\Code\\escooter_model-v3.pt'
+BATCH_SIZE = 1
+EPOCHS = 1000
+WINDOWSIZE = 5
+#WINDOWSIZE = 12
 HIDDENSIZE = 500
 NUMLAYERS = 2
-FUTURESIZE = 2
+FUTURESIZE = 1
 TRAINING_SIZE = .8
-INPUTSIZE = 1800
+#INPUTSIZE = 1800
+INPUTSIZE = 1152
 
 def get_device(default="cuda"):
     if torch.cuda.is_available() and default=="cuda":
@@ -45,9 +49,9 @@ def processor_info(device):
         print('Cached Memory   :', round(torch.cuda.memory_reserved(0)/1024**3,1), 'GB')
     return 
 
-
 class e_scootermodel(nn.Module):
     def __init__(self, model_file=None, device=None, hidden_size=51, num_layers=2, input_size=19, future_predict = 1):
+
         super(e_scootermodel, self).__init__()
         self.model_file = model_file if model_file is not None else 'escooter_model-v100.pt'
         self.device = device if device is not None else get_device()
@@ -60,12 +64,13 @@ class e_scootermodel(nn.Module):
         #auto encode and decode settings
         in_channels = 1
         channel1 = 16
-        enc_padding = 3
+        enc_padding = 2
         enc_channels = 2
         enc_kernels = 3
         dec_kernels = 2
         pool_kernels = 2
-        pool_stride = 4
+        #pool_stride = 4
+        pool_stride = 11
         learning_rate = 0.0001
         
         # Encoder
@@ -80,10 +85,11 @@ class e_scootermodel(nn.Module):
         )
         #Decoder
         self.decode = nn.Sequential(
-            torch.nn.Unflatten(1, (2, 30, 30)),                              #unflatten model
-            nn.ConvTranspose2d(enc_channels, channel1, dec_kernels, stride=pool_stride, padding=3, output_padding=3), # in_channels, out_channels, kernel_size
+            #torch.nn.Unflatten(1, (2, 30, 30)),                              #unflatten model
+            torch.nn.Unflatten(1, (2, 24, 24)), 
+            nn.ConvTranspose2d(enc_channels, channel1, dec_kernels, stride=pool_stride, padding=enc_padding, output_padding=3), # in_channels, out_channels, kernel_size
             nn.ReLU(),
-            nn.ConvTranspose2d(channel1, in_channels, dec_kernels, stride=pool_stride, padding=3, output_padding=0),  # in_channels, out_channels, kernel_size
+            nn.ConvTranspose2d(channel1, in_channels, dec_kernels, stride=pool_stride, padding=enc_padding, output_padding=2),  # in_channels, out_channels, kernel_size
             nn.Sigmoid()
         )
         
@@ -124,7 +130,7 @@ class e_scootermodel(nn.Module):
                               data_size_y))
         
         x = self.encode(x)          # encoded:  132x1800
-        
+
         encoded_size = x.shape[1]
         
         #reshape: 11x12x1800
@@ -142,27 +148,30 @@ class e_scootermodel(nn.Module):
         output = output[:,-1:]
         
         #create new feat using output
-        feat = torch.cat([x[:,1:], output[:,-1:]], dim=1)
+        x = torch.cat([x[:,1:], output[:,-1:]], dim=1)
+        
+        del output
         
         # the last output is fed as an input to the prediction             
         for i in range(future-1):
-            pred, hidden_state = self.lstm(feat, hidden_state)
+            pred, hidden_state = self.lstm(x, hidden_state)
             pred = self.linear(pred)
             #update with new last output
-            feat = torch.cat([feat[:,1:], pred[:,-1:]], dim=1)
+            x = torch.cat([x[:,1:], pred[:,-1:]], dim=1)
+            del pred
         
         
         #get predicted outputs 11x2x50
-        x = feat[:,-future:]
+        x = x[:,-future:]
         
-        del pred, feat, output
+        
         
         #reshape: 22x1800
         x = torch.reshape(x,((batch_size*future),
                               encoded_size))
         
         x = self.decode(x)          # decoded:  22x1x452x452
-        
+
         #reshape: 11x2x452x452
         x = torch.reshape(x,(batch_size,
                              future,
@@ -202,6 +211,8 @@ class e_scootermodel(nn.Module):
             train_loss = 0.0
             #Training
             for i, (features, labels) in tqdm(enumerate(loader),unit="batch", total=len(loader)):
+                torch.cuda.empty_cache()
+                
                 size = features.size(0)
                 #push feature and label to gpu
                 features = features.to(self.device)
@@ -210,9 +221,13 @@ class e_scootermodel(nn.Module):
                 #Get prediction from model
                 pred = self(features.float(),self.future_predict)
                 
+                del features
+                
                 #calculate loss
                 loss = self.criterion(pred, labels)
-                del features, labels, pred
+                
+                del labels, pred
+                
                 #empty memory
                 torch.cuda.empty_cache()
                 #zero at grad
@@ -223,6 +238,7 @@ class e_scootermodel(nn.Module):
                 self.optimizer.step()
                 
                 train_loss += loss.item()*size
+                
             
             train_loss = train_loss/len(loader)
             self.loss_list.append(train_loss)
@@ -255,7 +271,7 @@ class e_scootermodel(nn.Module):
             
             pred = pred[-1][-1]
             pred = pred.to('cpu')
-            labels = labels[0][-1]
+            labels = labels[0][1]
                 
             plt.imshow(labels, cmap='hot', interpolation='nearest')
             plt.show()
@@ -293,30 +309,6 @@ def read_pickle_file(file):
     #retun pickle data
     return objects[0]
 
-# class scooter_Dataset(Dataset):
-#     def __init__(self, data, window=20, future = 1):
-#         self.window =window
-#         self.data = data
-#         self.future = future
-        
-#         if len(self.data) < window:
-#             print("Window size is to big for data")
-#             sys.exit()
-        
-#     def __len__(self):
-#        #subtrace window size and 1 for the last input which will not have a label
-#        return len(self.data) - self.window - self.future
-        
-#     def __getitem__(self, idx):  
-        
-#         #Turn csr matrix notation into array notation for torch tensor
-#         #get window number of inputs starting from index
-#         features = torch.Tensor(np.array(list(self.data[i].toarray() for i in range(idx, idx+self.window))))
-        
-#         #get future number of inputs starting from after features end
-#         label = torch.Tensor(np.array(list(self.data[i].toarray() for i in range((idx+self.window),idx+self.window+self.future))))
-        
-#         return features, label
 
 class scooter_Dataset(Dataset):
     def __init__(self, data):
@@ -389,14 +381,14 @@ def initiate_loader(file, batchsize, window, train_size):
 
 
 if __name__ == "__main__":
+    #get device
+    device = get_device()
+    
     #empty memory
     torch.cuda.empty_cache()
     
     train_loader, test_loader = initiate_loader(SCOOTER_DATA, BATCH_SIZE, WINDOWSIZE, TRAINING_SIZE)
     
-    
-    #get device
-    device = get_device()
     
     processor_info(device)
     
@@ -409,6 +401,6 @@ if __name__ == "__main__":
                            future_predict = FUTURESIZE)
    
 
-    #model.train_model(train_loader, BATCH_SIZE, EPOCHS)
+    model.train_model(train_loader, BATCH_SIZE, EPOCHS)
     
     model.eval_model(test_loader, BATCH_SIZE)
