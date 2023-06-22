@@ -14,22 +14,21 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset
 from tqdm import tqdm
+import torch.utils.checkpoint as checkpoint
+from scipy.sparse import csr_matrix
 
 
 
-
-
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:21"
 SCOOTER_DATA = "C:\\Users\\ryang\\Desktop\\E_Scooter_Demand\\E-Scooter_Demand\\Code\\e_scooter_high_demand.pkl"
 MODEL_FILE = 'C:\\Users\\ryang\\Desktop\\E_Scooter_Demand\\E-Scooter_Demand\\Code\\escooter_model-v3.pt'
 BATCH_SIZE = 1
 EPOCHS = 1000
-WINDOWSIZE = 5
-#WINDOWSIZE = 12
+WINDOWSIZE = 11
 HIDDENSIZE = 500
 NUMLAYERS = 2
-FUTURESIZE = 1
+FUTURESIZE = 2
 TRAINING_SIZE = .8
-#INPUTSIZE = 1800
 INPUTSIZE = 1152
 
 def get_device(default="cuda"):
@@ -64,12 +63,11 @@ class e_scootermodel(nn.Module):
         #auto encode and decode settings
         in_channels = 1
         channel1 = 16
-        enc_padding = 2
+        enc_padding = 1
         enc_channels = 2
         enc_kernels = 3
         dec_kernels = 2
         pool_kernels = 2
-        #pool_stride = 4
         pool_stride = 11
         learning_rate = 0.0001
         
@@ -84,12 +82,11 @@ class e_scootermodel(nn.Module):
             torch.nn.Flatten()                                          #flatten model
         )
         #Decoder
-        self.decode = nn.Sequential(
-            #torch.nn.Unflatten(1, (2, 30, 30)),                              #unflatten model
+        self.decode = nn.Sequential(                            #unflatten model
             torch.nn.Unflatten(1, (2, 24, 24)), 
             nn.ConvTranspose2d(enc_channels, channel1, dec_kernels, stride=pool_stride, padding=enc_padding, output_padding=3), # in_channels, out_channels, kernel_size
             nn.ReLU(),
-            nn.ConvTranspose2d(channel1, in_channels, dec_kernels, stride=pool_stride, padding=enc_padding, output_padding=2),  # in_channels, out_channels, kernel_size
+            nn.ConvTranspose2d(channel1, in_channels, dec_kernels, stride=pool_stride, padding=enc_padding, output_padding=7),  # in_channels, out_channels, kernel_size
             nn.Sigmoid()
         )
         
@@ -108,7 +105,7 @@ class e_scootermodel(nn.Module):
         return 
     
     def forward(self, x, future=1):  
-        n_samples = x.size(0)
+        n_samples = len(x)
         
         h1 = torch.zeros(self.num_layers, n_samples, self.hidden_size, dtype=torch.float32, device=self.device)
         c1 = torch.zeros(self.num_layers, n_samples, self.hidden_size, dtype=torch.float32, device=self.device)
@@ -118,25 +115,31 @@ class e_scootermodel(nn.Module):
          
         # input:    batchsizexinputizexgridsizexgridsize
         #           11x12x452x452
-        batch_size = x.shape[0]
-        input_size = x.shape[1]
-        data_size_x =  x.shape[2]
-        data_size_y =  x.shape[3]
+        batch_size = len(x)
+        input_size = len(x[0])
+        data_size_x =  x[0][0].shape[0]
+        data_size_y =  data_size_x
         
-        #reshape: 60x1x452x452
-        x = torch.reshape(x,((batch_size*input_size),
-                              1,
-                              data_size_x,
-                              data_size_y))
-        
-        x = self.encode(x)          # encoded:  132x1800
 
-        encoded_size = x.shape[1]
+        encoded_x = []
+        
+        for i in range(batch_size):
+            for j in range(input_size):
+                x_array = torch.Tensor(x[i][j].toarray()).float()
+                x_array = torch.reshape(x_array,(1,1,data_size_x,data_size_x))
+                x_array = x_array.to(self.device)
+
+                encoded_x.append(self.encode(x_array)) # encoded:  132x1800
+
+        
+        x = torch.stack(encoded_x)
+        
+        del encoded_x
         
         #reshape: 11x12x1800
         x = torch.reshape(x,(batch_size,
                              input_size,
-                             encoded_size))
+                             self.input_size))
         
         
         
@@ -168,7 +171,7 @@ class e_scootermodel(nn.Module):
         
         #reshape: 22x1800
         x = torch.reshape(x,((batch_size*future),
-                              encoded_size))
+                              self.input_size))
         
         x = self.decode(x)          # decoded:  22x1x452x452
 
@@ -211,25 +214,19 @@ class e_scootermodel(nn.Module):
             train_loss = 0.0
             #Training
             for i, (features, labels) in tqdm(enumerate(loader),unit="batch", total=len(loader)):
-                torch.cuda.empty_cache()
                 
-                size = features.size(0)
-                #push feature and label to gpu
-                features = features.to(self.device)
+                size = len(features)
+                #push label to gpu
                 labels = labels.to(self.device)
                 
                 #Get prediction from model
-                pred = self(features.float(),self.future_predict)
-                
-                del features
+                pred = self(features,self.future_predict)
                 
                 #calculate loss
                 loss = self.criterion(pred, labels)
                 
-                del labels, pred
-                
-                #empty memory
                 torch.cuda.empty_cache()
+                
                 #zero at grad
                 self.optimizer.zero_grad()
                 
@@ -320,15 +317,25 @@ class scooter_Dataset(Dataset):
         
     def __getitem__(self, idx):  
         features, labels = self.data[idx]
+
         #Turn csr matrix notation into array notation for torch tensor
         #get window number of inputs starting from index
-        features = torch.Tensor(np.array(list(i.toarray() for i in features)))
-        
-        #get future number of inputs starting from after features end
-        label = torch.Tensor(np.array(list(i.toarray() for i in labels)))
-        
-        return features, label
+        #features = torch.Tensor(np.array(list(i.toarray() for i in features)))
 
+        #get future number of inputs starting from after features end
+        labels = np.array(list(i.toarray() for i in labels))
+        
+        return features, labels
+
+    
+def csr_collate(batch):
+    features = []
+    labels = []
+    for i in range(len(batch)):
+        features.append(batch[i][0])
+        labels.append(batch[i][1])
+    return features, torch.Tensor(np.array(labels))
+  
 class raw_Dataset(Dataset):
     def __init__(self, data, window=20, future = 1):
         self.window =window
@@ -343,14 +350,14 @@ class raw_Dataset(Dataset):
        #subtrace window size and 1 for the last input which will not have a label
        return len(self.data) - self.window - self.future
         
-    def __getitem__(self, idx, to_array=False):  
+    def __getitem__(self, idx):  
         
         #Turn csr matrix notation into array notation for torch tensor
         #get window number of inputs starting from index
         features = list(self.data[i] for i in range(idx, idx+self.window))
         
         #get future number of inputs starting from after features end
-        label = list(self.data[i]for i in range((idx+self.window),idx+self.window+self.future))
+        label = list(self.data[i] for i in range((idx+self.window),idx+self.window+self.future))
         
         return features, label
     
@@ -359,7 +366,7 @@ class raw_Dataset(Dataset):
     
 def initiate_loader(file, batchsize, window, train_size): 
     raw_data = read_pickle_file(file)
-    
+
     raw_dataset = raw_Dataset(raw_data, WINDOWSIZE, FUTURESIZE)
 
     train_size = int(train_size * len(raw_dataset))
@@ -370,10 +377,11 @@ def initiate_loader(file, batchsize, window, train_size):
     test_dataset  = scooter_Dataset(test_dataset)
     
     # to prepare training loader
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batchsize, num_workers=2)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batchsize, num_workers=2, collate_fn=csr_collate)
     # to prepare test loader
-    test_loader  = torch.utils.data.DataLoader(test_dataset,  batch_size=batchsize, num_workers=2)
+    test_loader  = torch.utils.data.DataLoader(test_dataset,  batch_size=batchsize, num_workers=2, collate_fn=csr_collate)
     
+
     del train_dataset, test_dataset, raw_data
 
     
@@ -381,26 +389,26 @@ def initiate_loader(file, batchsize, window, train_size):
 
 
 if __name__ == "__main__":
+    
     #get device
     device = get_device()
     
-    #empty memory
-    torch.cuda.empty_cache()
-    
     train_loader, test_loader = initiate_loader(SCOOTER_DATA, BATCH_SIZE, WINDOWSIZE, TRAINING_SIZE)
+    itr = iter(train_loader)
     
+    next(itr)
     
     processor_info(device)
     
     #create model
     model = e_scootermodel(model_file     = MODEL_FILE,
-                           device         = device,
-                           hidden_size    = HIDDENSIZE,
-                           num_layers     = NUMLAYERS,
-                           input_size     = INPUTSIZE,
-                           future_predict = FUTURESIZE)
+                            device         = device,
+                            hidden_size    = HIDDENSIZE,
+                            num_layers     = NUMLAYERS,
+                            input_size     = INPUTSIZE,
+                            future_predict = FUTURESIZE)
    
 
     model.train_model(train_loader, BATCH_SIZE, EPOCHS)
     
-    model.eval_model(test_loader, BATCH_SIZE)
+    #model.eval_model(test_loader, BATCH_SIZE)

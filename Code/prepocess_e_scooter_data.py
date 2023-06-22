@@ -145,7 +145,7 @@ def build_grid_database(df):
     demand_count = np.array([item[1] for item in GRID_DICT.values()])
     
     #high_demand_mask = (demand_count >= DEMAND_CUTOFF)
-    high_demand_mask = (abs(stats.zscore(demand_count) < 3))
+    high_demand_mask = (stats.zscore(demand_count) > -3)
     
     high_demand_ids = unique_id[high_demand_mask]
     
