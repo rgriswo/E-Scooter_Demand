@@ -5,7 +5,6 @@ Created on Sat May 13 18:37:53 2023
 @author: Ryan's computer
 """
 import sys
-sys.path.insert(0, 'C:\\Users\\ryang\\Desktop\\E_Scooter_Demand\\E-Scooter_Demand\Code') # location of src 
 import pandas as pd
 import header_names as hd
 import math 
@@ -16,9 +15,9 @@ from scipy import stats
 import numpy as np
 import pickle
 import torch
+from escooter_config import FILE_PATH 
 
 ###########global constants#################
-FILE_PATH = "C:\\Users\\ryang\\Desktop\\E_Scooter_Demand\\E-Scooter_Demand\\Data\\purr_scooter_data.csv"
 MILESToMETERS = 1609.34
 MIN_LAT = 39.630285
 MIN_LON = -86.327757

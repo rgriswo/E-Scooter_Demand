@@ -5,7 +5,6 @@ Created on Mon Jun 12 12:24:24 2023
 @author: ryang
 """
 import sys
-sys.path.insert(0, 'C:\\Users\\ryang\\Desktop\\E_Scooter_Demand\\E-Scooter_Demand\Code') # location of src 
 import pickle
 import os
 import numpy as np
@@ -16,12 +15,8 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 import torch.utils.checkpoint as checkpoint
 from scipy.sparse import csr_matrix
+from escooter_config import SCOOTER_DATA, MODEL_FILE
 
-
-
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:21"
-SCOOTER_DATA = "C:\\Users\\ryang\\Desktop\\E_Scooter_Demand\\E-Scooter_Demand\\Code\\e_scooter_high_demand.pkl"
-MODEL_FILE = 'C:\\Users\\ryang\\Desktop\\E_Scooter_Demand\\E-Scooter_Demand\\Code\\escooter_model-v3.pt'
 BATCH_SIZE = 1
 EPOCHS = 1000
 WINDOWSIZE = 11
