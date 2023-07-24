@@ -15,7 +15,8 @@ from scipy import stats
 import numpy as np
 import pickle
 import torch
-from escooter_config import FILE_PATH 
+from matplotlib import pyplot as plt
+from escooter_config import FILE_PATH
 
 ###########global constants#################
 MILESToMETERS = 1609.34
@@ -60,12 +61,6 @@ def lat_lon_to_x_y(lat,lon):
           max_unique_id = max([item[0] for item in GRID_DICT.values()])
           GRID_DICT[x_y] = [max_unique_id + 1,1]
           return GRID_DICT[x_y][0]
-
-# def lat_lon_to_x_y(lat,lon):
-#         print((lat- MIN_LAT)/RADIUS)
-#         x = abs(int((lat - MIN_LAT)/RADIUS))
-#         y = abs(int((lon - MIN_LON)/RADIUS))
-#         return x, y
     
 def set_min_max_lat_lon(lat,lon):
 
@@ -81,6 +76,15 @@ def date_to_seconds_since_epoch(date):
     dt = datetime.strptime(date, "%Y-%m-%dT%H:%M:%SZ")
     
     return dt.timestamp()
+
+def date_to_time_group_to_date(time_group):
+    seconds = ((time_group*TIME_INCREMENT) + TIME_OFFSET)
+    
+    seconds = datetime.fromtimestamp(seconds)
+    
+    dt = seconds.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    return dt
 
 def date_to_time_group(date):
     #turn date time into seconds tince epoch
@@ -150,6 +154,12 @@ def build_grid_database(df):
     
     high_demand_keys = keys[high_demand_mask]
     
+    row2 = [item[0] for item in GRID_DICT.values()]
+    row3 = [item[1] for item in GRID_DICT.values()]
+    data = {'row_1': GRID_DICT.keys(), 'row_2': row2, 'row_3': row3}
+    
+    pd.DataFrame.from_dict(data).to_csv("grid_dict.csv", index = False)
+    
     #update dictionary to only include high demand cells
     GRID_DICT = dict((tuple(k),GRID_DICT[tuple(k)]) for k in high_demand_keys)
     
@@ -182,6 +192,7 @@ def create_time_groups(df):
     df.rename(columns = rename_columns, inplace=True)
     
 def create_trip_db(df):
+    total_demand = []
     odlist = []
     
     id_list = [item[0] for item in GRID_DICT.values()]
@@ -222,22 +233,19 @@ def create_trip_db(df):
             j += 1
             
             current_pandas_index = indexs[j]
-            
-        odlist.append(coo)
+        timestamp = [date_to_time_group_to_date(i), date_to_time_group_to_date(i+1)]  
+        odlist.append([coo,timestamp])
+        total_demand.append(coo.sum())
         
+    
+    
+    plt.figure()
+    plt.title('Total Demand Graph')
+    plt.plot(total_demand)  
+    plt.savefig('Total_Demand_Graph.pdf')
+    
     return odlist
 
-       
-def normalize_trip_db(db):  
-    MIN = 0
-    MAX = 0
-    #find max of all matrixs
-    for matrix in db:
-        if len(matrix.data) > 0 and MAX < max(matrix.data):
-            MAX = max(matrix.data)
-    
-    for matrix in db:
-        matrix.data = (matrix.data - MIN)/(MAX - MIN)
             
 def main():  
     
@@ -264,6 +272,8 @@ def main():
     #set min and max lat lons 
     set_min_max_lat_lon(lat, lon)
     
+    print("start building grid database")
+    
     df_filtered = build_grid_database(df_filtered)
     
     print("finished grid database")
@@ -276,19 +286,10 @@ def main():
     
     print("Created trib db")
     
-    normalize_trip_db(trip_db)
-    
-    print("finshed normalizing data")
-    
     df_filtered.to_csv("out.csv", index = False)
     
-    row2 = [item[0] for item in GRID_DICT.values()]
-    row3 = [item[1] for item in GRID_DICT.values()]
-    data = {'row_1': GRID_DICT.keys(), 'row_2': row2, 'row_3': row3}
     
-    pd.DataFrame.from_dict(data).to_csv("grid_dict.csv", index = False)
-    
-    with open('e_scooter_high_demand.pkl', 'wb') as sout:
+    with open('e_scooter.pkl', 'wb') as sout:
         pickle.dump(trip_db, sout, pickle.HIGHEST_PROTOCOL)
     
     
