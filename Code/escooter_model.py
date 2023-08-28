@@ -1,5 +1,12 @@
 # -*- coding: utf-8 -*-
 """
+Created on Mon Aug 28 18:14:52 2023
+
+@author: ryang
+"""
+
+# -*- coding: utf-8 -*-
+"""
 Created on Mon Jun 12 12:24:24 2023
 
 @author: ryang
@@ -16,9 +23,11 @@ from tqdm import tqdm
 from scipy import sparse
 import pandas as pd
 import seaborn as sns
-from escooter_config import SCOOTER_DATA, MODEL_FILE, GRID_DICT
-from escooter_config import MODEL_CONFIG, BATCH_SIZE, EPOCHS, WINDOWSIZE
+import escooter_config as config
+from escooter_config import SCOOTER_DATA, MODEL_FILE, GRID_DICT, MODEL_CONFIG, BATCH_SIZE, EPOCHS, WINDOWSIZE, CITY
 from datetime import datetime
+import random
+from math import prod
 
 TRAINING_SIZE = .9
 MIN = 0
@@ -47,7 +56,7 @@ def processor_info(device):
     return 
 
 class e_scootermodel(nn.Module):
-    def __init__(self, model_config, model_file=None, device=None, len_extra_features = 0):
+    def __init__(self, model_config, input_size = 0, model_file=None, device=None, len_extra_features = 0):
 
         super(e_scootermodel, self).__init__()
         self.model_file = model_file if model_file is not None else 'escooter_model-v100.pt'
@@ -60,6 +69,7 @@ class e_scootermodel(nn.Module):
         self.input_size = model_config["input_size"]
     
         #auto encode and decode settings
+        grid_size = model_config["grid_size"]
         in_channels = model_config["in_channels"]
         channel1 = model_config["channel1"]
         enc_padding = model_config["enc_padding"]
@@ -73,8 +83,20 @@ class e_scootermodel(nn.Module):
         output_padding1 = model_config["output_padding1"]
         output_padding2 = model_config["output_padding2"]
         
+        #calculate the total number of features that need to be outputed from linear layer
+        number_cells = prod(grid_size)
+        
+        #because of decode size it currenly assiens 2 extra collums when decoding
+        output_grid = grid_size.copy()
+        output_grid[2] +=  2
+        
+        output_cells = prod(output_grid)
+        
         # Encoder
         self.encode = nn.Sequential (
+            torch.nn.Flatten() , #flatten the input to be inputed into the linear layer
+            torch.nn.Linear(input_size , number_cells), #shrink the number of cell for new grid size
+            torch.nn.Unflatten(1, grid_size), # unflatten cells into grid size
             nn.Conv2d(in_channels, channel1, enc_kernels, padding=enc_padding), # in_channels, out_channels, kernel_size
             nn.ReLU(),
             nn.MaxPool2d(pool_kernels, pool_stride),                   # kernel_size, stride
@@ -89,16 +111,19 @@ class e_scootermodel(nn.Module):
             nn.ConvTranspose2d(enc_channels, channel1, dec_kernels, stride=pool_stride, padding=enc_padding, output_padding=output_padding1), # in_channels, out_channels, kernel_size
             nn.ReLU(),
             nn.ConvTranspose2d(channel1, in_channels, dec_kernels, stride=pool_stride, padding=enc_padding, output_padding=output_padding2),  # in_channels, out_channels, kernel_size
-            nn.Sigmoid()
+            torch.nn.Flatten(), #flatten output to be inputed into linear layer
+            torch.nn.Linear(output_cells, input_size), #reconstruct original grid size
+
         )
         
+        #input to lSTM will be the number of laten featurese plus size of extra features such as time of day and so on
         self.lstm = torch.nn.LSTM(self.input_size + len_extra_features, self.hidden_size, num_layers=self.num_layers,
                                   batch_first=True)
         
+        #Linear layer to reconstruct output of LSTM into input size for auto encoder 
         self.linear = torch.nn.Linear(self.hidden_size, self.input_size)
-        
         self.criterion = torch.nn.MSELoss()
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
+        self.optimizer = torch.optim.Adam(self.parameters())
         self.loss_list = [] 
         self.to(self.device)
         
@@ -116,46 +141,32 @@ class e_scootermodel(nn.Module):
         hidden_state = (h1, c1)  
          
         # input:    batchsizexinputizexgridsizexgridsize
-        #           11x12x452x452
-        batch_size = len(x)
-        input_size = len(x[0])
-        data_size_x =  x[0][0].shape[0]
-        data_size_y =  data_size_x
+        batch_size = x.shape[0]
+        window_size = x.shape[1]
+        channel_size = x.shape[2]
         
-        encoded_x = []
+        data_size_x =   x.shape[3]
+        data_size_y =   x.shape[4]
         
-        #iterate though all csr matrix and encode them
-        for i in range(batch_size):
-            for j in range(input_size):
-                
-                #convert csr matrx to 2D array
-                x_array = torch.Tensor(x[i][j].toarray()).float()
-                
-                #reashpe data into batchsize, 1dim, then size of grid
-                x_array = torch.reshape(x_array,(1,1,data_size_x,data_size_x))
-                
-                #send data to device 
-                x_array = x_array.to(self.device)
-                
-                #encode data
-                encoded_x.append(self.encode(x_array)) # encoded:  132x1800
+        #reshape input from LSTM window size into array for autoencoder
+        x = torch.reshape(x,(batch_size * window_size,
+                             channel_size,
+                             data_size_x,
+                             data_size_y))
+        
+        x = self.encode(x)
 
-        #convert from a list of tensors to a tensor of tensors 
-        x = torch.stack(encoded_x)
-        
-        del encoded_x
-        
-        #reshape: 11x12x1800
+        #reshape:
         x = torch.reshape(x,(batch_size,
-                             input_size,
+                             window_size,
                              self.input_size))
-        
+
         #append the time features 
-        x = torch.cat((x,time_features[:,:len(x[i])]),-1)
+        x = torch.cat((x,time_features[:,:window_size]),-1)
         
-        output, hidden_state = self.lstm(x, hidden_state) #predict: 11x12x50
+        output, hidden_state = self.lstm(x, hidden_state) #predict: 
         
-        output = self.linear(output)                      #reshape: 11x12x5202       
+        output = self.linear(output)                      #reshape:       
         
         #get LSTM output
         output = output[:,-1:]
@@ -199,20 +210,21 @@ class e_scootermodel(nn.Module):
 
         
         
-        #get predicted outputs 11x2x50
+        #get predicted outputs
         x = output
         
         
         
-        #reshape: 22x1800
+        #reshape: output to inputsXinputsize
         x = torch.reshape(x,((batch_size*future),
                               self.input_size))
         
-        x = self.decode(x)          # decoded:  22x1x452x452
+        x = self.decode(x)
 
-        #reshape: 11x2x452x452
+        #reshape: output after being decoded to BatchsizeXFutureXChannelXData_size_xXData_size_Z
         x = torch.reshape(x,(batch_size,
                              future,
+                             channel_size,
                              data_size_x,
                              data_size_y))
         
@@ -251,13 +263,16 @@ class e_scootermodel(nn.Module):
             for i, (features, labels, time_features) in tqdm(enumerate(loader),unit="batch", total=len(loader)):
              
                 size = len(features)
-                #push feature and label to gpu
+                
+                #push features/time_features and label to gpu
                 labels = labels.to(self.device)
+    
+                features = features.to(self.device)
                 
                 time_features = time_features.to(self.device)
                 
                 #Get prediction from model
-                pred = self(features,time_features,self.future_predict)
+                pred = self(features, time_features, self.future_predict)
                 
                 #calculate loss
                 loss = self.criterion(pred, labels)
@@ -285,91 +300,53 @@ class e_scootermodel(nn.Module):
         
         self.train(False)
         return   
-
+            
     def eval_model(self, data, window_size=20, pos=0):
         self.eval()
         
-        #read grid dict
-        df = pd.read_csv(GRID_DICT,sep=',')
-        grid_dict = {}
-        
-        for i, row in df.iterrows():
-            grid_dict[row[df.columns[0]]]= [row[df.columns[1]]]
-            
         with torch.no_grad():    # disabled gradient calculation
         
             itr = iter(data)
             
-            input_data, labels, time_features = next(itr)
+            z = 0
             
+            for input_data, labels, time_features in itr:
+                if z == 20:
+                    break
+                else:
+                    z +=1
+                    
             time_features = time_features.to(self.device)
+            input_data = input_data.to(self.device)
+            
             
             pred = self(input_data, time_features, future=self.future_predict)
             
-            pred = pred[-1][0]
+            
             pred = pred.to('cpu')
-            labels = labels[-1][0]
             
+            pred = torch.round(pred)
             
-            time = train_loader.dataset.get_label_times(0)
+            end_pred = pred[0][0][1]
+            end_labels = labels[0][0][1]
             
-            pred_csr = sparse.csr_matrix(unnormalize_grid(pred,MIN,MAX))
-            labels_csr = sparse.csr_matrix(unnormalize_grid(labels,MIN,MAX))
-            pred_dict = dict(pred_csr.todok().items())
-            labels_dict = dict(labels_csr.todok().items())
-            
-            pred_grid_locations_x = []
-            pred_grid_locations_y = []
-            
-            for i in pred_dict.keys():
-                x = list(grid_dict.keys())[list(grid_dict.values()).index(i[0])]
-                y = list(grid_dict.keys())[list(grid_dict.values()).index(i[1])]
-                pred_grid_locations_x.append(x)
-                pred_grid_locations_y.append(y)
-                    
-            pred_data = {'Grid Location': pred_dict.keys(), 'Demand': pred_dict.values(),
-                    'Start Location': pred_grid_locations_x,
-                    'End Location': pred_grid_locations_y}
-            
-            pd.DataFrame.from_dict(pred_data).to_csv("pred_value.csv", index = False)
-            
-                
-            labels_grid_locations_x = []
-            labels_grid_locations_y = []
-            
-            for i in labels_dict.keys():
-                x = list(grid_dict.keys())[list(grid_dict.values()).index(i[0])]
-                y = list(grid_dict.keys())[list(grid_dict.values()).index(i[1])]
-                labels_grid_locations_x.append(x)
-                labels_grid_locations_y.append(y)
-
-            
-            label_data = {'Grid Location': labels_dict.keys(), 'Demand': labels_dict.values(),
-                    'Start Location': labels_grid_locations_x,
-                    'End Location': labels_grid_locations_y}
-            
-            pd.DataFrame.from_dict(label_data).to_csv("label_data.csv", index = False)
+            pred = pred[0][0][0]
+            labels = labels[0][0][0]
             
             print("predicted")
-            print(sparse.csr_matrix(unnormalize_grid(pred,MIN,MAX)))
+            print(sparse.csr_matrix(pred))
             
             print("actual")
-            print(sparse.csr_matrix(unnormalize_grid(labels,MIN,MAX)))
+            print(sparse.csr_matrix(labels))
             
-            labels = unnormalize_grid(labels,MIN,MAX)
-            pred = unnormalize_grid(pred,MIN,MAX)
             
-            plt.figure()
-            sns.heatmap(labels, cmap=sns.cubehelix_palette(as_cmap=True), vmax=4)
-            #plt.imshow(labels, cmap='hot', interpolation='nearest')
-            plt.title("Actual: "+ time[0])
-            plt.show()
+            create_heatmap(labels, CITY + ": Start Actual (First Hour)")
             
-            plt.figure()
-            sns.heatmap(pred, cmap=sns.cubehelix_palette(as_cmap=True))
-            #plt.imshow(pred, cmap='hot', interpolation='nearest')
-            plt.title("Pred: "+ time[0])
-            plt.show()
+            create_heatmap(pred, CITY + ": Start Pred (First Hour)")
+            
+            create_heatmap(end_labels, CITY + ": End Actual (First Hour)")
+            
+            create_heatmap(end_pred, CITY + ": End Pred (First Hour)")
             
             plt.figure()
             plt.title("Loss")
@@ -377,13 +354,25 @@ class e_scootermodel(nn.Module):
             plt.xlabel("Epoch")
             plt.plot(self.loss_list)
             
-            pred_demand = []
-            label_demand = []
+            start_pred_demand = []
+            start_label_demand = []
             
+            end_pred_demand = []
+            end_label_demand = []
+            
+            start_loss_plt = {}
+            end_loss_plt = {}
+            
+            for i in range(self.future_predict):
+                start_loss_plt[i] = 0
+                end_loss_plt[i] = 0
+
             for i, (feature, label, time_features) in tqdm(enumerate(data),unit="batch", total=len(data)):
                 #push feature and label to gpu
                 
-                label   = (label).to(self.device)
+                label   = label.to(self.device)
+                
+                feature = feature.to(self.device)
                 
                 time_features = time_features.to(self.device)
                 
@@ -392,27 +381,92 @@ class e_scootermodel(nn.Module):
                 
                 loss = self.criterion(pred, label)
                 
-                pred = unnormalize_grid(pred[0][0],MIN,MAX)
-                label = unnormalize_grid(label[0][0],MIN,MAX)
-                
                 pred = pred.to('cpu')
                 label = label.to('cpu')
                 
-                pred_demand.append(sparse.csr_matrix(pred).sum())
-                label_demand.append(sparse.csr_matrix(label).sum())
+                #go through each future prediciton and calculate the loss
+                for j in range(self.future_predict):
+
+                    start_loss_plt[j] += self.criterion(pred[:,j,0,:,:], label[:,j,0,:,:])
+                    end_loss_plt[j] += self.criterion(pred[:,j,1,:,:], label[:,j,1,:,:])
+                
+                #round the predictions
+                pred = torch.round(pred)
+                
+                #grab the first hour predicted
+                start_pred = pred[0][0][0]
+                start_label = label[0][0][0]
+                
+                end_pred = pred[0][0][1]
+                end_label = label[0][0][1]
+                
+                #append the sum of the first hour of prediction to array to be 
+                #used for graphing later
+                start_pred_demand.append(sparse.csr_matrix(start_pred).sum())
+                start_label_demand.append(sparse.csr_matrix(start_label).sum())
+                
+                end_pred_demand.append(sparse.csr_matrix(end_pred).sum())
+                end_label_demand.append(sparse.csr_matrix(end_label).sum())
             
-            plt.figure()
-            plt.title("Total Demand Prediced")
-            plt.plot(pred_demand)
-            plt.figure()
-            plt.title("Total Demand Actual: "+ time[0])
-            plt.plot(label_demand)
+            
+            create_total_demand_chart(start_pred_demand, 
+                                      start_label_demand,  
+                                      CITY + ": Total Start Demand Actual Vs Prediced (Only Predicting First Hour)")
+            
+
+            create_total_demand_chart(end_pred_demand, 
+                                      end_label_demand,  
+                                      CITY + ": Total End Demand Actual Vs Prediced (Only Predicting First Hour)")
+            
+            
+            #calculate the averge loss for each future preiction
+            average_start_loss =  np.array(list(start_loss_plt.values())) / len(data)
+            
+            average_end_loss = np.array(list(end_loss_plt.values())) / len(data)
+            
+            create_loss_chart(start_loss_plt.keys(),average_start_loss,
+                              CITY + ": Average Start Loss")
+
+            create_loss_chart(end_loss_plt.keys(),average_end_loss,
+                              CITY + ": Average End Loss")
+            
+            create_loss_chart(start_loss_plt.keys(),start_loss_plt.values(),
+                              CITY + ": Total Start Loss (" + str(len(data)) +" samples)")
+            
+            create_loss_chart(end_loss_plt.keys(),end_loss_plt.values(),
+                              CITY + ": Total End Loss (" + str(len(data)) +" samples)")
+
             print("test loss =", loss.item())
             
             
             
             
         return 
+
+
+def create_heatmap(data, title):
+    plt.figure()
+    g = sns.heatmap(data, cmap=sns.cubehelix_palette(as_cmap=True))
+    plt.title("Indy: Start Actual (First Hour)")
+    g.axes.set_ylim(0,max(data.shape))
+    plt.show()
+
+def create_total_demand_chart(pred_data, label_data,  title):
+    plt.figure()
+    plt.title(title)
+    plt.xlabel('Hours')
+    plt.ylabel('Demand')
+    plt.plot(pred_data)
+    plt.plot(label_data)
+    plt.legend(['Pred','Actual'])
+
+def create_loss_chart(xlabel, ylabel, title):
+    plt.figure()
+    plt.title(title)
+    plt.xlabel('Hours In the Future')
+    plt.ylabel('Total MSE Loss')
+    plt.bar(xlabel, ylabel)
+    
     
 def read_pickle_file(file):
     #read pick file
@@ -442,7 +496,7 @@ class scooter_Dataset(Dataset):
         features, labels, times_label = self.data[idx]
 
         #get future number of inputs starting from after features end
-        labels = np.array(list(i.toarray() for i in labels))
+        labels = labels
         
         #get time_features for future number of inputs starting from after features end
         time_features = [extract_time_features(i) for i in times_label]
@@ -463,11 +517,12 @@ def csr_collate(batch):
     
     #iterate though the batch each batch contains the information returned
     #by __getitem__ in scooter_Dataset
+
     for i in range(len(batch)):
         features.append(batch[i][0])
         labels.append(batch[i][1])
         time_features.append(batch[i][2])
-    return features, torch.Tensor(np.array(labels)), torch.Tensor(np.array(time_features))
+    return torch.Tensor(np.array(features,dtype = np.single)).float(), torch.Tensor(np.array(labels,dtype = np.single)), torch.Tensor(np.array(time_features))
 
 class raw_Dataset(Dataset):
     def __init__(self, data, window=20, future = 1):
@@ -487,13 +542,13 @@ class raw_Dataset(Dataset):
         
         #Turn csr matrix notation into array notation for torch tensor
         #get window number of inputs starting from index
-        features = list(self.data[i][0] for i in range(idx, idx+self.window))
+        features = list(np.stack((self.data[i][0].toarray(), self.data[i][1].toarray())) for i in range(idx, idx+self.window))
         
         #get future number of inputs starting from after features end
-        label = list(self.data[i][0] for i in range((idx+self.window),idx+self.window+self.future))
+        label = list(np.stack((self.data[i][0].toarray(), self.data[i][1].toarray())) for i in range((idx+self.window),idx+self.window+self.future))
         
         #get time_features for the output to be predicted
-        times_features = list(self.data[i][1][0] for i in range(idx, idx+self.window+self.future))
+        times_features = list(self.data[i][2][0] for i in range(idx, idx+self.window+self.future))
         
         return features, label, times_features
     
@@ -503,32 +558,22 @@ class raw_Dataset(Dataset):
 def initiate_loader(file, batchsize, window, furure_size, train_size): 
     raw_data = read_pickle_file(file)
     
-    #remove outliers from data base 
-    raw_data = remove_outliers(raw_data)
-    
-    #normalize data
-    normalize_trip_db(raw_data)
+    #get training dataset size 
+    train_size = int(train_size * len(raw_data))
     
     #create dataset for raw data 
-    raw_dataset = raw_Dataset(raw_data, window, furure_size)
-
-    #get training dataset size 
-    train_size = int(train_size * len(raw_dataset))
+    train_raw_dataset = raw_Dataset(raw_data[:train_size], window, furure_size)
+    test_raw_dataset = raw_Dataset(raw_data[train_size:], window, furure_size)
     
-    #get test dataset size
-    test_size = len(raw_dataset) - train_size
-    
-    #split data set into training and test data set
-    train_dataset, test_dataset = torch.utils.data.random_split(raw_dataset, [train_size, test_size])
     
     #tranform raw dataset to scooter dataset 
     #the scooter dataset handles the data is diffrently since the data is 
     #no longer in order after the split
-    train_dataset = scooter_Dataset(train_dataset)
-    test_dataset  = scooter_Dataset(test_dataset)
+    train_dataset = scooter_Dataset(train_raw_dataset)
+    test_dataset  = scooter_Dataset(test_raw_dataset)
     
     # to prepare training loader
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batchsize, num_workers=2, collate_fn=csr_collate)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batchsize, num_workers=4, collate_fn=csr_collate, shuffle = True)
     # to prepare test loader
     test_loader  = torch.utils.data.DataLoader(test_dataset,  batch_size=1, num_workers=2, collate_fn=csr_collate)
     
@@ -538,8 +583,10 @@ def initiate_loader(file, batchsize, window, furure_size, train_size):
     return train_loader, test_loader
 
 def extract_time_features(str_date):
-    #create datetime from string
-    date = datetime.strptime(str_date, "%Y-%m-%dT%H:%M:%SZ")
+    #create datetime from string %Y-%m-%dT%H:%M:%SZ"
+    #"%Y-%m-%dT%H:%M"
+    
+    date = datetime.strptime(str_date, config.data_format)
     
     #return the week days in one hot encode same with month
     #also return the time of the data which is normalized 
@@ -628,13 +675,17 @@ if __name__ == "__main__":
     
     processor_info(device)
     
+    #get the size of the input data
+    input_size = np.prod(next(iter(train_loader))[0][0][0].shape)
+    
     #create model
     model = e_scootermodel(model_file     = MODEL_FILE,
                            model_config = MODEL_CONFIG,
+                           input_size = input_size,
                             device         = device,
                             len_extra_features = 20)
    
 
-    model.train_model(train_loader, BATCH_SIZE, EPOCHS)
+    #model.train_model(train_loader, BATCH_SIZE, EPOCHS)
     
     model.eval_model(test_loader, BATCH_SIZE)
