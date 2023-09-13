@@ -581,7 +581,7 @@ class raw_Dataset(Dataset):
     
 def initiate_loader(file, batchsize, window, furure_size, train_size): 
     raw_data = read_pickle_file(file)
-    raw_data =raw_data[:2000]
+    
     #get training dataset size 
     train_size = int(train_size * len(raw_data))
     
