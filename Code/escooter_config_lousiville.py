@@ -5,13 +5,13 @@ Created on Mon Jul 10 16:54:12 2023
 @author: ryang
 """
 
-SCOOTER_DATA = "e_scooter_250.pkl"
-MODEL_FILE = 'e_scooter_250_lousiville_v4.pt'
+SCOOTER_DATA = "e_scooter_250_lousiville.pkl"
+MODEL_FILE = 'e_scooter_lousiville_GRU_v1.pt'
 GRID_DICT = 'grid_dict_250.csv'
 FILE_PATH = "lousiville-escooter-2018-2019.csv"
 
 BATCH_SIZE = 10
-EPOCHS = 500
+EPOCHS = 1
 WINDOWSIZE = 74
 data_format = "%Y-%m-%dT%H:%M"
 
@@ -32,4 +32,5 @@ MODEL_CONFIG = {"grid_size" : [2, 74 , 40], #Grid size the input grid will be tr
                 "learning_rate" : 0.0001, #learning rate
                 "output_padding1" : 1, #padding for decoder
                 "output_padding2" : 1, #padding for decoder second layer
-                "unflatten_dim" : (9, 17, 9)} #unflatten dimentions for decoder
+                "unflatten_dim" : (9, 17, 9), #unflatten dimentions for decoder
+                "rnn_type" : "GRU"} #Type of RNN network use LSTM, GRU, RNN

@@ -11,7 +11,7 @@ Created on Mon Jun 12 12:24:24 2023
 
 @author: ryang
 """
-import sys
+
 import pickle
 import os
 import numpy as np
@@ -23,12 +23,12 @@ from tqdm import tqdm
 from scipy import sparse
 import pandas as pd
 import seaborn as sns
-import escooter_config as config
-from escooter_config import SCOOTER_DATA, MODEL_FILE, GRID_DICT, MODEL_CONFIG, BATCH_SIZE, EPOCHS, WINDOWSIZE, CITY
 from datetime import datetime
 import random
 from math import prod
+import sys
 
+config = None
 TRAINING_SIZE = .9
 MIN = 0
 MAX = 0
@@ -67,7 +67,8 @@ class e_scootermodel(nn.Module):
         self.hidden_size = model_config["hidden_size"]
         self.num_layers = model_config["num_layers"] 
         self.input_size = model_config["input_size"]
-    
+        self.rnn_type = model_config["rnn_type"]
+        
         #auto encode and decode settings
         grid_size = model_config["grid_size"]
         in_channels = model_config["in_channels"]
@@ -82,6 +83,7 @@ class e_scootermodel(nn.Module):
         unflatten_dim = model_config["unflatten_dim"]
         output_padding1 = model_config["output_padding1"]
         output_padding2 = model_config["output_padding2"]
+        
         
         #calculate the total number of features that need to be outputed from linear layer
         number_cells = prod(grid_size)
@@ -116,9 +118,19 @@ class e_scootermodel(nn.Module):
 
         )
         
-        #input to lSTM will be the number of laten featurese plus size of extra features such as time of day and so on
-        self.lstm = torch.nn.LSTM(self.input_size + len_extra_features, self.hidden_size, num_layers=self.num_layers,
-                                  batch_first=True)
+        if(self.rnn_type == "LSTM"):
+            #input to lSTM will be the number of laten featurese plus size of extra features such as time of day and so on
+            self.rnn = torch.nn.LSTM(self.input_size + len_extra_features, self.hidden_size, num_layers=self.num_layers,
+                                      batch_first=True)
+        elif (self.rnn_type == "GRU"):
+            self.rnn = torch.nn.GRU(self.input_size + len_extra_features, self.hidden_size, num_layers=self.num_layers,
+                                      batch_first=True)
+        elif (self.rnn_type == "RNN"):
+            self.rnn = torch.nn.RNN(self.input_size + len_extra_features, self.hidden_size, num_layers=self.num_layers,
+                                      batch_first=True)
+        else:
+            raise Exception("RNN Type not Suported please try LSTM, GRU, or RNN")
+            
         
         #Linear layer to reconstruct output of LSTM into input size for auto encoder 
         self.linear = torch.nn.Linear(self.hidden_size, self.input_size)
@@ -134,11 +146,18 @@ class e_scootermodel(nn.Module):
     def forward(self, x, time_features, future=1):  
         n_samples = len(x)
         
-        h1 = torch.zeros(self.num_layers, n_samples, self.hidden_size, dtype=torch.float32, device=self.device)
-        c1 = torch.zeros(self.num_layers, n_samples, self.hidden_size, dtype=torch.float32, device=self.device)
-        #LSTM hidden states init 0
         
-        hidden_state = (h1, c1)  
+        if(self.rnn_type == "LSTM"):
+            #LSTM hidden states init 0
+            h1 = torch.zeros(self.num_layers, n_samples, self.hidden_size, dtype=torch.float32, device=self.device)
+            c1 = torch.zeros(self.num_layers, n_samples, self.hidden_size, dtype=torch.float32, device=self.device)
+            hidden_state = (h1, c1)  
+        else:
+            #RNN and GRU hidden states init 0
+            hidden_state = torch.zeros(self.num_layers, n_samples, self.hidden_size, dtype=torch.float32, device=self.device)
+        
+        
+        
          
         # input:    batchsizexinputizexgridsizexgridsize
         batch_size = x.shape[0]
@@ -164,7 +183,8 @@ class e_scootermodel(nn.Module):
         #append the time features 
         x = torch.cat((x,time_features[:,:window_size]),-1)
         
-        output, hidden_state = self.lstm(x, hidden_state) #predict: 
+        
+        output, hidden_state = self.rnn(x, hidden_state) #predict: 
         
         output = self.linear(output)                      #reshape:       
         
@@ -187,7 +207,7 @@ class e_scootermodel(nn.Module):
         
         # the last output is fed as an input to the prediction             
         for i in range(1,future):
-            pred, hidden_state = self.lstm(x, hidden_state)
+            pred, hidden_state = self.rnn(x, hidden_state)
             
             pred = self.linear(pred)
             
@@ -340,13 +360,13 @@ class e_scootermodel(nn.Module):
             print(sparse.csr_matrix(labels))
             
             
-            create_heatmap(labels, CITY + ": Start Actual (First Hour)")
+            create_heatmap(labels, config.CITY + " Start Actual (First Hour)")
             
-            create_heatmap(pred, CITY + ": Start Pred (First Hour)")
+            create_heatmap(pred, config.CITY + " Start Pred (First Hour)")
             
-            create_heatmap(end_labels, CITY + ": End Actual (First Hour)")
+            create_heatmap(end_labels, config.CITY + " End Actual (First Hour)")
             
-            create_heatmap(end_pred, CITY + ": End Pred (First Hour)")
+            create_heatmap(end_pred, config.CITY + " End Pred (First Hour)")
             
             plt.figure()
             plt.title("Loss")
@@ -411,12 +431,12 @@ class e_scootermodel(nn.Module):
             
             create_total_demand_chart(start_pred_demand, 
                                       start_label_demand,  
-                                      CITY + ": Total Start Demand Actual Vs Prediced (Only Predicting First Hour)")
+                                      config.CITY + " Total Start Demand Actual Vs Prediced (Only Predicting First Hour)")
             
 
             create_total_demand_chart(end_pred_demand, 
                                       end_label_demand,  
-                                      CITY + ": Total End Demand Actual Vs Prediced (Only Predicting First Hour)")
+                                     config.CITY + " Total End Demand Actual Vs Prediced (Only Predicting First Hour)")
             
             
             #calculate the averge loss for each future preiction
@@ -425,16 +445,16 @@ class e_scootermodel(nn.Module):
             average_end_loss = np.array(list(end_loss_plt.values())) / len(data)
             
             create_loss_chart(start_loss_plt.keys(),average_start_loss,
-                              CITY + ": Average Start Loss")
+                              config.CITY + " Average Start Loss")
 
             create_loss_chart(end_loss_plt.keys(),average_end_loss,
-                              CITY + ": Average End Loss")
+                              config.CITY + " Average End Loss")
             
             create_loss_chart(start_loss_plt.keys(),start_loss_plt.values(),
-                              CITY + ": Total Start Loss (" + str(len(data)) +" samples)")
+                              config.CITY + " Total Start Loss (" + str(len(data)) +" samples)")
             
             create_loss_chart(end_loss_plt.keys(),end_loss_plt.values(),
-                              CITY + ": Total End Loss (" + str(len(data)) +" samples)")
+                              config.CITY + " Total End Loss (" + str(len(data)) +" samples)")
 
             print("test loss =", loss.item())
             
@@ -447,9 +467,10 @@ class e_scootermodel(nn.Module):
 def create_heatmap(data, title):
     plt.figure()
     g = sns.heatmap(data, cmap=sns.cubehelix_palette(as_cmap=True))
-    plt.title("Indy: Start Actual (First Hour)")
+    plt.title(title)
     g.axes.set_ylim(0,max(data.shape))
-    plt.show()
+    plt.savefig(title)
+
 
 def create_total_demand_chart(pred_data, label_data,  title):
     plt.figure()
@@ -459,6 +480,8 @@ def create_total_demand_chart(pred_data, label_data,  title):
     plt.plot(pred_data)
     plt.plot(label_data)
     plt.legend(['Pred','Actual'])
+    plt.savefig(title)
+
 
 def create_loss_chart(xlabel, ylabel, title):
     plt.figure()
@@ -466,6 +489,7 @@ def create_loss_chart(xlabel, ylabel, title):
     plt.xlabel('Hours In the Future')
     plt.ylabel('Total MSE Loss')
     plt.bar(xlabel, ylabel)
+    plt.savefig(title)
     
     
 def read_pickle_file(file):
@@ -484,9 +508,9 @@ def read_pickle_file(file):
 
 
 class scooter_Dataset(Dataset):
-    def __init__(self, data):
+    def __init__(self, data, data_format):
         self.data = data
-        
+        self.data_format = data_format
     def __len__(self):
         #subtrace window size and 1 for the last input which will not have a label
         return len(self.data)
@@ -497,9 +521,9 @@ class scooter_Dataset(Dataset):
 
         #get future number of inputs starting from after features end
         labels = labels
-        
+
         #get time_features for future number of inputs starting from after features end
-        time_features = [extract_time_features(i) for i in times_label]
+        time_features = [extract_time_features(i,self.data_format) for i in times_label]
         
         return features, labels, time_features
     
@@ -557,7 +581,7 @@ class raw_Dataset(Dataset):
     
 def initiate_loader(file, batchsize, window, furure_size, train_size): 
     raw_data = read_pickle_file(file)
-    
+    raw_data =raw_data[:2000]
     #get training dataset size 
     train_size = int(train_size * len(raw_data))
     
@@ -569,8 +593,8 @@ def initiate_loader(file, batchsize, window, furure_size, train_size):
     #tranform raw dataset to scooter dataset 
     #the scooter dataset handles the data is diffrently since the data is 
     #no longer in order after the split
-    train_dataset = scooter_Dataset(train_raw_dataset)
-    test_dataset  = scooter_Dataset(test_raw_dataset)
+    train_dataset = scooter_Dataset(train_raw_dataset, config.data_format)
+    test_dataset  = scooter_Dataset(test_raw_dataset, config.data_format)
     
     # to prepare training loader
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batchsize, num_workers=4, collate_fn=csr_collate, shuffle = True)
@@ -582,11 +606,12 @@ def initiate_loader(file, batchsize, window, furure_size, train_size):
     
     return train_loader, test_loader
 
-def extract_time_features(str_date):
+def extract_time_features(str_date, data_format):
+
     #create datetime from string %Y-%m-%dT%H:%M:%SZ"
     #"%Y-%m-%dT%H:%M"
     
-    date = datetime.strptime(str_date, config.data_format)
+    date = datetime.strptime(str_date, data_format)
     
     #return the week days in one hot encode same with month
     #also return the time of the data which is normalized 
@@ -658,34 +683,50 @@ def normalize_trip_db(db):
     for matrix, i in db:
         matrix.data = normalize_data(matrix.data, MIN, MAX)
 
-
+def import_config(config_name):
+    global config
+    config = __import__(config_name)
+    return config
     
-if __name__ == "__main__":    
-    #get device
-    device = get_device()
+if __name__ == "__main__":   
+    def main():
+        
+        argumentList = sys.argv[1:]
+        
+        for i in argumentList:
+            
+            #import config file
+            import_config(i)
+            
+            #get device
+            device = get_device()
+            
+            #empty memory
+            torch.cuda.empty_cache()
+            train_loader, test_loader = initiate_loader(config.SCOOTER_DATA, 
+                                                        config.BATCH_SIZE, 
+                                                        config.WINDOWSIZE, 
+                                                        config.MODEL_CONFIG["future_size"],
+                                                        TRAINING_SIZE)
+            
+            
+            processor_info(device)
+            
+            #get the size of the input data
+            input_size = np.prod(next(iter(train_loader))[0][0][0].shape)
+            
+            #create model
+            model = e_scootermodel(model_file     = config.MODEL_FILE,
+                                   model_config = config.MODEL_CONFIG,
+                                   input_size = input_size,
+                                    device         = device,
+                                    len_extra_features = 20)
+               
+            
+            model.train_model(train_loader, config.BATCH_SIZE, config.EPOCHS)
+            
+            model.eval_model(test_loader, config.BATCH_SIZE)
+    main()
     
-    #empty memory
-    torch.cuda.empty_cache()
-    train_loader, test_loader = initiate_loader(SCOOTER_DATA, 
-                                                BATCH_SIZE, 
-                                                WINDOWSIZE, 
-                                                MODEL_CONFIG["future_size"],
-                                                TRAINING_SIZE)
     
-    
-    processor_info(device)
-    
-    #get the size of the input data
-    input_size = np.prod(next(iter(train_loader))[0][0][0].shape)
-    
-    #create model
-    model = e_scootermodel(model_file     = MODEL_FILE,
-                           model_config = MODEL_CONFIG,
-                           input_size = input_size,
-                            device         = device,
-                            len_extra_features = 20)
    
-
-    #model.train_model(train_loader, BATCH_SIZE, EPOCHS)
-    
-    model.eval_model(test_loader, BATCH_SIZE)
