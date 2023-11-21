@@ -6,15 +6,16 @@ Created on Mon Jul 10 16:54:12 2023
 """
 
 SCOOTER_DATA = "e_scooter_250_kansas.pkl"
-MODEL_FILE = 'e_scooter_kansas_GRU_v1.pt'
+MODEL_FILE = 'e_scooter_250_kansas_v7_GRU.pt'
 GRID_DICT = 'grid_dict_250_kanas.csv'
 FILE_PATH = "kansas-Microtransit__Scooter_and_Ebike__Trips.csv"
+eval_file = 'e_scooter_250_short_compare_kansas.pkl'
 
 BATCH_SIZE = 10
-EPOCHS = 1
-WINDOWSIZE = 168
+EPOCHS = 115
+WINDOWSIZE = 74
 
-CITY = "Kansas"
+CITY = "Kansas_LSTM"
 data_format = "%m/%d/%YT%H:%M:%S" #date timeformat of data
 
 MODEL_CONFIG = {"grid_size" : [2, 74 , 40], #Grid size the input grid will be transformed into 
@@ -34,4 +35,4 @@ MODEL_CONFIG = {"grid_size" : [2, 74 , 40], #Grid size the input grid will be tr
                 "output_padding1" : 1, #padding for decoder
                 "output_padding2" : 1, #padding for decoder second layer
                 "unflatten_dim" : (9, 17, 9), #unflatten dimentions for decoder
-                "rnn_type" : "GRU"} #Type of RNN network use LSTM, GRU, RNN
+                "rnn_type" : "LSTM"} #Type of RNN network use LSTM, GRU, RNN

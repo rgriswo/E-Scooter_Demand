@@ -6,15 +6,17 @@ Created on Mon Jul 10 16:54:12 2023
 """
 
 SCOOTER_DATA = "e_scooter_250_indy.pkl"
-MODEL_FILE = 'e_scooter_indy_GRU_v1.pt'
+MODEL_FILE = 'e_scooter_250_indy_v9.pt'
 GRID_DICT = 'grid_dict_250_indy.csv'
 FILE_PATH = "purr_scooter_data.csv"
+eval_file = 'e_scooter_250_short_indy.pkl'
+#eval_file = 'e_scooter_250_short_ALL.pkl'
 
 BATCH_SIZE = 5
-EPOCHS = 500
-WINDOWSIZE = 168
+EPOCHS = 115
+WINDOWSIZE = 74
 
-CITY = 'Indy' #City will be used when creating data
+CITY = 'Indy_LSTM' #City will be used when creating data
 
 data_format = "%Y-%m-%dT%H:%M:%SZ"  #date timeformat of data
 
@@ -35,4 +37,4 @@ MODEL_CONFIG = {"grid_size" : [2, 74 , 40], #Grid size the input grid will be tr
                 "output_padding1" : 1, #padding for decoder
                 "output_padding2" : 1, #padding for decoder second layer
                 "unflatten_dim" : (9, 17, 9), #unflatten dimentions for decoder
-                "rnn_type" : "GRU"} #Type of RNN network use LSTM, GRU, RNN
+                "rnn_type" : "LSTM"} #Type of RNN network use LSTM, GRU, RNN
