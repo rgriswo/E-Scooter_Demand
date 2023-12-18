@@ -120,13 +120,13 @@ class e_scootermodel(nn.Module):
         
         if(self.rnn_type == "LSTM"):
             #input to lSTM will be the number of laten featurese plus size of extra features such as time of day and so on
-            self.rnn = torch.nn.LSTM(self.input_size + len_extra_features, self.hidden_size, num_layers=self.num_layers,
+            self.lstm = torch.nn.LSTM(self.input_size + len_extra_features, self.hidden_size, num_layers=self.num_layers,
                                       batch_first=True)
         elif (self.rnn_type == "GRU"):
-            self.rnn = torch.nn.GRU(self.input_size + len_extra_features, self.hidden_size, num_layers=self.num_layers,
+            self.lstm = torch.nn.GRU(self.input_size + len_extra_features, self.hidden_size, num_layers=self.num_layers,
                                       batch_first=True)
         elif (self.rnn_type == "RNN"):
-            self.rnn = torch.nn.RNN(self.input_size + len_extra_features, self.hidden_size, num_layers=self.num_layers,
+            self.lstm = torch.nn.RNN(self.input_size + len_extra_features, self.hidden_size, num_layers=self.num_layers,
                                       batch_first=True)
         else:
             raise Exception("RNN Type not Suported please try LSTM, GRU, or RNN")
@@ -184,7 +184,7 @@ class e_scootermodel(nn.Module):
         x = torch.cat((x,time_features[:,:window_size]),-1)
         
         
-        output, hidden_state = self.rnn(x, hidden_state) #predict: 
+        output, hidden_state = self.lstm(x, hidden_state) #predict: 
         
         output = self.linear(output)                      #reshape:       
         
@@ -207,7 +207,7 @@ class e_scootermodel(nn.Module):
         
         # the last output is fed as an input to the prediction             
         for i in range(1,future):
-            pred, hidden_state = self.rnn(x, hidden_state)
+            pred, hidden_state = self.lstm(x, hidden_state)
             
             pred = self.linear(pred)
             
@@ -458,8 +458,17 @@ class e_scootermodel(nn.Module):
 
             print("test loss =", loss.item())
             
+            eval_stats = {'Training Loss' : self.loss_list,
+                          'Start Pred' : start_pred_demand, 
+                          'Start Label' : start_label_demand, 
+                          'End Pred' : end_pred_demand,
+                          'End Label' : end_label_demand,
+                          'Start Loss' : average_start_loss, 
+                          'End Loss' : average_end_loss}
             
             
+            with open(config.eval_file, 'ab') as sout:
+                pickle.dump([config.CITY,eval_stats], sout, pickle.HIGHEST_PROTOCOL)
             
         return 
 
@@ -470,6 +479,7 @@ def create_heatmap(data, title):
     plt.title(title)
     g.axes.set_ylim(0,max(data.shape))
     plt.savefig(title)
+    plt.close()
 
 
 def create_total_demand_chart(pred_data, label_data,  title):
@@ -481,6 +491,7 @@ def create_total_demand_chart(pred_data, label_data,  title):
     plt.plot(label_data)
     plt.legend(['Pred','Actual'])
     plt.savefig(title)
+    plt.close()
 
 
 def create_loss_chart(xlabel, ylabel, title):
@@ -490,6 +501,7 @@ def create_loss_chart(xlabel, ylabel, title):
     plt.ylabel('Total MSE Loss')
     plt.bar(xlabel, ylabel)
     plt.savefig(title)
+    plt.close()
     
     
 def read_pickle_file(file):
@@ -692,7 +704,7 @@ if __name__ == "__main__":
     def main():
         
         argumentList = sys.argv[1:]
-        
+
         for i in argumentList:
             
             #import config file
