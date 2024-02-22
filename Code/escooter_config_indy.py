@@ -5,7 +5,7 @@ Created on Mon Jul 10 16:54:12 2023
 @author: ryang
 """
 GLOBAL_VAR = "model_data"
-SCOOTER_DATA = "%model_data%\\e_scooter_250_indy.pkl"
+SCOOTER_DATA = "e_scooter_250_indy.pkl"
 MODEL_FILE = 'e_scooter_250_indy_v9.pt'
 GRID_DICT = 'grid_dict_250_indy.csv'
 FILE_PATH = "purr_scooter_data.csv"
