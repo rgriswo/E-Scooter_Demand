@@ -6,13 +6,13 @@ Created on Mon Jul 10 16:54:12 2023
 """
 GLOBAL_VAR = "model_data"
 SCOOTER_DATA = "e_scooter_250_lousiville.pkl"
-MODEL_FILE = 'e_scooter_250_lousiville_v6_new.pt'
+MODEL_FILE = 'e_scooter_250_lousiville.pt'
 GRID_DICT = 'grid_dict_250.csv'
 FILE_PATH = "lousiville-escooter-2018-2019.csv"
-eval_file = 'e_scooter_250_long_lou_1_26_2024.pkl'
+eval_file = 'e_scooter_lousiville_output.pkl'
 
-BATCH_SIZE = 10
-EPOCHS = 37
+BATCH_SIZE = 5
+EPOCHS = 115
 WINDOWSIZE = 74
 data_format = "%Y-%m-%dT%H:%M"
 
