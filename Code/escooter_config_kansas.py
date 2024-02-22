@@ -4,15 +4,15 @@ Created on Mon Jul 10 16:54:12 2023
 
 @author: ryang
 """
-
+GLOBAL_VAR = "model_data"
 SCOOTER_DATA = "e_scooter_250_kansas.pkl"
-MODEL_FILE = 'e_scooter_250_kansas_v7_GRU.pt'
+MODEL_FILE = 'e_scooter_250_kansas_v7.pt'
 GRID_DICT = 'grid_dict_250_kanas.csv'
 FILE_PATH = "kansas-Microtransit__Scooter_and_Ebike__Trips.csv"
-eval_file = 'e_scooter_250_short_compare_kansas.pkl'
+eval_file = 'e_scooter_250_long_compare_kansas_1_26_2024.pkl'
 
 BATCH_SIZE = 10
-EPOCHS = 115
+EPOCHS = 55
 WINDOWSIZE = 74
 
 CITY = "Kansas_LSTM"
@@ -21,7 +21,7 @@ data_format = "%m/%d/%YT%H:%M:%S" #date timeformat of data
 MODEL_CONFIG = {"grid_size" : [2, 74 , 40], #Grid size the input grid will be transformed into 
                 "hidden_size" : 550, #Hidden layer of the LSTM
                 "num_layers" : 2, #Number of layers of the LSTM
-                "future_size" : 24, #Number of future outputs that the LSTM will predict
+                "future_size" : 200, #Number of future outputs that the LSTM will predict
                 "input_size" : 1377, #Input size of the LSTM (number of latent features created by the encoder)
                 "in_channels" : 2, #number in input channels for convolution network
                 "channel1" : 18, # number of channes in first convolution channls
