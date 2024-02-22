@@ -6,13 +6,13 @@ Created on Mon Jul 10 16:54:12 2023
 """
 GLOBAL_VAR = "model_data"
 SCOOTER_DATA = "e_scooter_250_kansas.pkl"
-MODEL_FILE = 'e_scooter_250_kansas_v7.pt'
+MODEL_FILE = 'e_scooter_250_kansa.pt'
 GRID_DICT = 'grid_dict_250_kanas.csv'
 FILE_PATH = "kansas-Microtransit__Scooter_and_Ebike__Trips.csv"
-eval_file = 'e_scooter_250_long_compare_kansas_1_26_2024.pkl'
+eval_file = 'e_scooter_kansas_output.pkl'
 
-BATCH_SIZE = 10
-EPOCHS = 55
+BATCH_SIZE = 5
+EPOCHS = 115
 WINDOWSIZE = 74
 
 CITY = "Kansas_LSTM"
