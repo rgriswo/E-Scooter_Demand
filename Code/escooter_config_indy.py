@@ -6,11 +6,10 @@ Created on Mon Jul 10 16:54:12 2023
 """
 GLOBAL_VAR = "model_data"
 SCOOTER_DATA = "e_scooter_250_indy.pkl"
-MODEL_FILE = 'e_scooter_250_indy_v9.pt'
+MODEL_FILE = 'e_scooter_250_indy.pt'
 GRID_DICT = 'grid_dict_250_indy.csv'
 FILE_PATH = "purr_scooter_data.csv"
-eval_file = 'e_scooter_250_long_indy_1_26_2024.pkl'
-#eval_file = 'e_scooter_250_long_indy.pkl'
+eval_file = 'e_scooter_indy_output.pkl'
 
 BATCH_SIZE = 5
 EPOCHS = 115
