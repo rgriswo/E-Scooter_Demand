@@ -38,6 +38,7 @@ def unnormalize_grid(grid, MIN, MAX):
     grid = torch.round((grid * (MAX - MIN)) + MIN)
     
     return grid
+
 def get_device(default="cuda"):
     if torch.cuda.is_available() and default=="cuda":
         device = torch.device('cuda')
@@ -383,6 +384,9 @@ class e_scootermodel(nn.Module):
             start_loss_plt = {}
             end_loss_plt = {}
             
+            start_pred_demand_values = []
+            start_label_demand_values = []
+            
             for i in range(self.future_predict):
                 start_loss_plt[i] = 0
                 end_loss_plt[i] = 0
@@ -431,12 +435,12 @@ class e_scootermodel(nn.Module):
             
             create_total_demand_chart(start_pred_demand, 
                                       start_label_demand,  
-                                      config.CITY + " Total Start Demand Actual Vs Prediced (Only Predicting First Hour)")
+                                      config.CITY + " Total Start Demand Pred Vs Actual")
             
 
             create_total_demand_chart(end_pred_demand, 
                                       end_label_demand,  
-                                     config.CITY + " Total End Demand Actual Vs Prediced (Only Predicting First Hour)")
+                                     config.CITY + " Total End Demand Pred Vs Actual")
             
             
             #calculate the averge loss for each future preiction
@@ -483,12 +487,13 @@ def create_heatmap(data, title):
 
 
 def create_total_demand_chart(pred_data, label_data,  title):
+
     plt.figure()
     plt.title(title)
     plt.xlabel('Hours')
     plt.ylabel('Demand')
     plt.plot(pred_data)
-    plt.plot(label_data)
+    plt.plot(label_data, linestyle='dashed' )
     plt.legend(['Pred','Actual'])
     plt.savefig(title)
     plt.close()
@@ -499,7 +504,7 @@ def create_loss_chart(xlabel, ylabel, title):
     plt.title(title)
     plt.xlabel('Hours In the Future')
     plt.ylabel('Total MSE Loss')
-    plt.bar(xlabel, ylabel)
+    plt.plot(xlabel, ylabel)
     plt.savefig(title)
     plt.close()
     
@@ -715,7 +720,12 @@ if __name__ == "__main__":
             
             #empty memory
             torch.cuda.empty_cache()
-            train_loader, test_loader = initiate_loader(config.SCOOTER_DATA, 
+            
+            #create path to scooter file from environmental variable and filename
+            data_path = os.path.join(os.environ[config.GLOBAL_VAR], 
+                                     config.SCOOTER_DATA)
+            
+            train_loader, test_loader = initiate_loader(data_path, 
                                                         config.BATCH_SIZE, 
                                                         config.WINDOWSIZE, 
                                                         config.MODEL_CONFIG["future_size"],
