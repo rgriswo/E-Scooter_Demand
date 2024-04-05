@@ -230,9 +230,7 @@ def main(filename):
     print("finished grid database")
       
     trip_db = create_trip_db(df)
-    
-    print("Created trib db")
-    
+        
     df.to_csv("out.csv", index = False)
     
     pkl_name = pathlib.PurePath.joinpath(pathlib.Path(filename).parent, pathlib.Path(filename).stem+'.pkl')
@@ -241,16 +239,26 @@ def main(filename):
     # todo: to save offset and bbox into the same pickle file
     # done: they are stored as a tuple (4/5/2024)
     #
+    print("write a pickle file as", pkl_name)
     with open(pkl_name, 'wb') as sout:
         pickle.dump((offset, bbox, trip_db), sout, pickle.HIGHEST_PROTOCOL)
     
     return df
 
+def command_proc():
+    # use this program as command
+    # usage: python preproc.py [csvfiles ...]
+    #
+    for filename in sys.argv[1:]:
+        main(filename)
+
 if __name__ == "__main__":
     config = read_config('escooter.ini')
-    df = main('purr.csv')
+    command_proc() 
+    
+    # df = main('purr.csv')
     # df = main('louisville.csv')
-    # df = main('kansas.csv')
+    df = main('kansas.csv')
     # df = main(r'C:\Users\dskim\Documents\Data\scooter\purr_scooter_data.csv')
     # df = main(r'C:\Users\dskim\Documents\Data\scooter\lousiville-escooter-2018-2019.csv')
     # df = main(r'C:\Users\dskim\Documents\Data\scooter\Kansas-Microtransit__Scooter_and_Ebike__Trips.csv')
