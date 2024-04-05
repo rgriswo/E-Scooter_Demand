@@ -239,9 +239,10 @@ def main(filename):
     
     #
     # todo: to save offset and bbox into the same pickle file
+    # done: they are stored as a tuple (4/5/2024)
     #
     with open(pkl_name, 'wb') as sout:
-        pickle.dump(trip_db, sout, pickle.HIGHEST_PROTOCOL)
+        pickle.dump((offset, bbox, trip_db), sout, pickle.HIGHEST_PROTOCOL)
     
     return df
 
