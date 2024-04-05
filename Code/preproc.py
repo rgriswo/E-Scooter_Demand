@@ -14,22 +14,14 @@ from scipy import stats
 import numpy as np
 import pickle
 import torch
+import pathlib
 from matplotlib import pyplot as plt
-MIN_LAT = 39.45696255557861
-MIN_LON = -86.52754146554861
-MAX_LAT = 40.082422163805646
-MAX_LON = -85.70699289671025
+from readconfig import read_config
 
 ###########global constants#################
-pickle_name = "e_scooter_indy.pkl"
-grid_dict = 'grid_dict_250_indy.csv'
-#gid size in meters 
-#Time_increments in seconds (1 hour = 3600 seconds)
-TIME_INCREMENT = 3600
-TIME_OFFSET = 0
-X_Y_DICT = {}
-DEMAND_CUTOFF = 100
 EARTH_RADIUS = 6371         # in kilometer
+EARTH_CIRCUM = EARTH_RADIUS * 2 * m.pi * 1000    # meterdf[]
+
 #############################################
 config = {}
    
@@ -61,159 +53,25 @@ def find_bbox(df):
     max_lon = m.ceil (max_lon * ALIGN_FACTOR) / ALIGN_FACTOR
     # print("min, max =", min_lat, max_lat, min_lon, max_lon)    
     # print("diff lat, lon =", max_lat - min_lat, max_lon - min_lon)
-    return ((min_lat,max_lat),(min_lon,max_lon))
+    return [[min_lat,max_lat],[min_lon,max_lon]]
 
-def lat_lon_to_x_y(lat,lon):
-      #calculate the distance
-      dx = (lon-MIN_LON)*EARTH_CIRCUM*math.cos((MIN_LAT+lat)*math.pi/360)/360
-      dy = (lat-MIN_LAT)*EARTH_CIRCUM/360
-      #divide distance by size
-      dx = int(dx / config['general']['cell_size'])
-      dy = int(dy / config['general']['cell_size'])
+def gps2grid(lat,lon, min_lat, min_lon):
+    # lat and lon can be pandas series
+    #calculate the distance
+    dx = (lon-min_lon)*EARTH_CIRCUM*m.cos(min_lat*m.pi/360)/360
+    dy = (lat-min_lat)*EARTH_CIRCUM/360
+    # divide distance by grid size
+    dx = dx / config['general']['cell_size']
+    dy = dy / config['general']['cell_size']      
+    return dx.astype('int32'), dy.astype('int32')
       
-      #combine x and y grid location
-      x_y = (dx,dy)
-      
-      #if its the first grid location add it to dictionary
-      if len(X_Y_DICT) == 0:
-          X_Y_DICT[x_y] = [0,1]
-          #    return X_Y_DICT[x_y][0]
-
-      #if x and y has already been assinged a number return number
-      if x_y in X_Y_DICT:
-          X_Y_DICT[x_y][1] = X_Y_DICT[x_y][1] + 1
-        #    return X_Y_DICT[x_y][0]
-        #else assigned x and y a new number and add it to dictionary
-      else:
-            max_unique_id = max([item[0] for item in X_Y_DICT.values()])
-            X_Y_DICT[x_y] = [max_unique_id + 1,1]
-            #    return X_Y_DICT[x_y][0]
-
-      return dx, dy
-
-#lambdafunc to turn lat lon into x y
-pos_lambda_func = lambda x: pd.Series(np.concatenate([lat_lon_to_x_y(x[hd.start_lat],x[hd.start_lon]),
-                                                    lat_lon_to_x_y(x[hd.end_lat],x[hd.end_lon])]))
-end_lambda_func = lambda x: pd.Series(lat_lon_to_x_y(x[hd.end_lat],x[hd.end_lon]))
-
-                                      #lat_lon_to_x_y(x[hd.end_lat],x[hd.end_lon])])
-
-time_lambda_func = lambda x: pd.Series([date_to_time_group(x[hd.start_time]),
-                                        date_to_time_group(x[hd.end_time])])  
-    
-def build_grid_database(df, bb):    
-    replace_columns = ['start_lat', 'start_lon', 'end_lat', 'end_lon']
-    
-    #turn lat lon values into x y coordinates
-    x_y_coord =  df.apply(pos_lambda_func, axis = 1)
-
-    df[replace_columns] = x_y_coord
-
-    #new column names
-    x_y_col  = ['start_x', 'start_y', 'end_x', 'end_y']
-    
-    #create dict for rename columns
-    rename_columns = dict(zip(replace_columns ,x_y_col))
-    
-    #rename columns
-    df.rename(columns = rename_columns, inplace=True)
-    
-    global X_Y_DICT
-    
-    #get high demands cells
-    keys = np.array(tuple(X_Y_DICT.keys()))
-    
-    unique_id = np.array([item[0] for item in X_Y_DICT.values()])
-    
-    demand_count = np.array([item[1] for item in X_Y_DICT.values()])
-    
-    #high_demand_mask = (demand_count >= DEMAND_CUTOFF)
-    high_demand_mask = (stats.zscore(demand_count) > -3)
-    
-    high_demand_ids = unique_id[high_demand_mask]
-    
-    high_demand_keys = keys[high_demand_mask]
-    
-    row2 = [item[0] for item in X_Y_DICT.values()]
-    row3 = [item[1] for item in X_Y_DICT.values()]
-    data = {'row_1': X_Y_DICT.keys(), 'row_2': row2, 'row_3': row3}
-    
-    pd.DataFrame.from_dict(data).to_csv(grid_dict, index = False)
-    
-    #update dictionary to only include high demand cells
-    #X_Y_DICT = dict((tuple(k),X_Y_DICT[tuple(k)]) for k in high_demand_keys)
-    
-    
-    #filter out cells without high demands
-    #for col in x_y_col:
-    #    df = df[list((i in high_demand_ids for i in df[col]))]
-    return df              
-   
-def create_trip_db(df):
-    total_demand = []
-    odlist = []
-    
-    lats = np.concatenate((df['start_x'], df['end_x']))    
-    lons = np.concatenate((df['start_y'], df['end_y']))
-    
-    lats = np.unique(lats)
-    lons = np.unique(lons)
-    
-    matrix_dim = (len(lats), len(lons))
-    
-    #sort data by time groups
-    df.sort_values('start_time_group', inplace=True)
-
-    #get pandas indexs
-    indexs = df['start_time_group'].index
-    
-    
-    #current index
-    j=0
-    
-    #current pandas indedx
-    current_pandas_index = indexs[j]
-
-    for i in range(max(df['start_time_group'])):
-        
-        #create coordinate matrix for time group
-        start_coo = coo_matrix(matrix_dim, dtype=np.uint16)
-        start_coo = sp.csr_matrix(start_coo) 
-        
-        end_coo = coo_matrix(matrix_dim, dtype=np.uint16)
-        end_coo = sp.csr_matrix(end_coo) 
-        
-        while (df['start_time_group'][current_pandas_index] == i):
-            
-            #get x and y
-            start_x = np.where(lats == df['start_x'][current_pandas_index])[0]
-            start_y = np.where(lons == df['start_y'][current_pandas_index])[0]
-            
-            end_x = np.where(lats == df['end_x'][current_pandas_index])[0]
-            end_y = np.where(lons == df['end_y'][current_pandas_index])[0]
-            
-            #increment cell demand for x and y coordinates
-            start_coo[start_x,start_y] +=  1
-            
-            end_coo[end_x,end_y] +=  1
-            
-            #increment to the next index
-            j += 1
-            
-            current_pandas_index = indexs[j]
-        timestamp = [date_to_time_group_to_date(i), date_to_time_group_to_date(i+1)]  
-        odlist.append([start_coo,end_coo,timestamp])
-        total_demand.append(start_coo.sum()+end_coo.sum())
-        
-    
-    
-    plt.figure()
-    plt.title('Total Demand Graph')
-    plt.plot(total_demand)  
-    plt.savefig('Total_Demand_Graph.pdf')
-    
-    return odlist
-
+def timestamp_rollover(x):
+    if "T24:00" in x:
+        ts = pd.Timestamp(x.replace("T24:00", "T00:00"))
+        ts += pd.to_timedelta(1, unit='d')
+    else:
+        ts = pd.Timestamp(x)   
+    return ts
 # Open database have have different schema.  
 #  
 def formalize(df, kind):
@@ -221,8 +79,8 @@ def formalize(df, kind):
         df['start_tag'] = df['start_time_utc'].apply(lambda x: pd.Timestamp(x))
         df['end_tag']   = df['end_time_utc'].apply(lambda x: pd.Timestamp(x))
     elif kind == "TYPE_LOUISVILLE":
-        df['start_tag'] = df[['StartDate', 'StartTime']].agg('T'.join, axis=1).apply(lambda x: pd.Timestamp(x))
-        df['end_tag'] = df[['EndDate', 'EndTime']].agg('T'.join, axis=1).apply(lambda x: pd.Timestamp(x))
+        df['start_tag'] = df[['StartDate', 'StartTime']].agg('T'.join, axis=1).apply(lambda x: timestamp_rollover(x))
+        df['end_tag'] = df[['EndDate', 'EndTime']].agg('T'.join, axis=1).apply(lambda x: timestamp_rollover(x))
         df = df.rename(columns={"StartLatitude":"start_lat", "StartLongitude":"start_lon",
                            "EndLatitude":"end_lat", "EndLongitude":"end_lon"
                            })
@@ -249,7 +107,7 @@ def calculate_time_index(df):
     delta = df['start_tag'] - offset
     hour = delta.apply(lambda x: x.seconds/3600)
     df['time_slot'] = hour.astype(int)
-    return df
+    return df, offset
 
 
 def remove_short_distance(df, threshold_distance):
@@ -274,6 +132,7 @@ def filter_outliers(df, zval=5.0):
           
     return df
 
+
 def database_schema(df):
     if 'start_time_utc' in df.columns:
         kind = 'TYPE_PURR'
@@ -285,7 +144,55 @@ def database_schema(df):
         kind = 'TYPE_DEFAULT'
     return kind
 
-from readconfig import read_config
+
+def build_grid_database(df, bb):
+    min_lat = bb[0][0]
+    min_lon = bb[1][0]    
+    df['start_x'], df['start_y'] = gps2grid(df['start_lat'], df['start_lon'],
+                                            min_lat, min_lon)
+    df['end_x'], df['end_y'] = gps2grid(df['end_lat'], df['end_lon'], 
+                                        min_lat, min_lon)
+    return df              
+   
+def create_trip_db(df):
+    total_demand = []
+    slot_list = []
+    odlist = []
+    dimx = 1 + max(np.concatenate([df['start_x'],df['end_x']]))
+    dimy = 1 + max(np.concatenate([df['start_y'],df['end_y']]))
+    
+    df.sort_values("time_slot", inplace=True)
+    
+    curr_slot = -1          # initialize.  slot never be nagative
+    origin = np.zeros((dimx,dimy), dtype=int)
+    destin = np.zeros((dimx,dimy), dtype=int)     
+            
+    for i, r in df.iterrows():
+        
+        if curr_slot != r['time_slot']:
+            if curr_slot >= 0:
+                odlist.append([origin, destin, curr_slot])
+                total_demand.append(origin.sum())
+                slot_list.append(curr_slot)
+                
+            curr_slot = r['time_slot']
+            origin = np.zeros((dimx,dimy), dtype=int)
+            destin = np.zeros((dimx,dimy), dtype=int)         
+            
+        origin[ r['start_x'], r['start_y']] += 1
+        destin[ r['end_x'],   r['end_y']]   += 1
+        
+    odlist.append([origin, destin, curr_slot])
+    total_demand.append(origin.sum())
+    slot_list.append(curr_slot)
+    
+    plt.figure()
+    plt.title('Total Demand Graph')
+    plt.plot(total_demand)  
+    plt.scatter(slot_list, total_demand)
+#    plt.savefig('Total_Demand_Graph.pdf')
+    
+    return odlist
 
 def main(filename):  
     print("reading %s" % filename)
@@ -301,6 +208,7 @@ def main(filename):
     # to rename columns to short underscored
     # to select only columns useful    
     db_type = database_schema(df)
+
     df = formalize(df, db_type) 
     print("Shape after formalize reading\t\t", df.shape)
     
@@ -310,17 +218,15 @@ def main(filename):
     df = filter_outliers(df, zval=3)    
     print("Shape after filter outliers  \t\t", df.shape)
     
-    df = calculate_time_index(df)
+    df, offset = calculate_time_index(df)
     print("Shape after calculate time index \t", df.shape)
 
     #get list of all lat and longs from start and end groups
     print("start building grid database")
-    bbox = find_bbox(df) 
+    bbox = find_bbox(df)            # [[min_lat, max_lat], [min_lon, max_lon]]
     
     df = build_grid_database(df, bbox)
     
-    return df   
-  
     print("finished grid database")
       
     trip_db = create_trip_db(df)
@@ -329,11 +235,15 @@ def main(filename):
     
     df.to_csv("out.csv", index = False)
     
+    pkl_name = pathlib.PurePath.joinpath(pathlib.Path(filename).parent, pathlib.Path(filename).stem+'.pkl')
     
-    with open(pickle_name, 'wb') as sout:
+    #
+    # todo: to save offset and bbox into the same pickle file
+    #
+    with open(pkl_name, 'wb') as sout:
         pickle.dump(trip_db, sout, pickle.HIGHEST_PROTOCOL)
     
-    
+    return df
 
 if __name__ == "__main__":
     config = read_config('escooter.ini')
@@ -341,3 +251,5 @@ if __name__ == "__main__":
     # df = main('louisville.csv')
     # df = main('kansas.csv')
     # df = main(r'C:\Users\dskim\Documents\Data\scooter\purr_scooter_data.csv')
+    # df = main(r'C:\Users\dskim\Documents\Data\scooter\lousiville-escooter-2018-2019.csv')
+    # df = main(r'C:\Users\dskim\Documents\Data\scooter\Kansas-Microtransit__Scooter_and_Ebike__Trips.csv')
