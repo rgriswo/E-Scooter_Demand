@@ -13,14 +13,14 @@ import scipy.sparse as sp
 from scipy import stats
 import numpy as np
 import pickle
-import torch
+# import torch
 import pathlib
 from matplotlib import pyplot as plt
 from readconfig import read_config
 
 ###########global constants#################
-EARTH_RADIUS = 6371         # in kilometer
-EARTH_CIRCUM = EARTH_RADIUS * 2 * m.pi * 1000    # meterdf[]
+EARTH_RADIUS = 6371*1000                # in meter
+EARTH_CIRCUM = EARTH_RADIUS * 2 * m.pi  # meterdf[]
 
 #############################################
 config = {}
@@ -28,6 +28,7 @@ config = {}
 def z_score(x,u,r):
     return (x-u)/r
 
+# to calculate the distance from 2 GPS positions
 def haversine(lat1, lon1, lat2, lon2):
     lon1, lat1, lon2, lat2 = map(m.radians, [lon1, lat1, lon2, lat2])
     dlon = lon2 - lon1
@@ -37,24 +38,8 @@ def haversine(lat1, lon1, lat2, lon2):
     base = c * EARTH_RADIUS
     return base
 
-def find_bbox(df):
-    lat = np.concatenate((df['start_lat'], df['end_lat'])) 
-    lon = np.concatenate((df['start_lon'], df['end_lon']))
-    min_lat = min(lat)
-    max_lat = max(lat)
-    min_lon = min(lon)
-    max_lon = max(lon)
-    # print("find_bbox()")
-    # print("min, max =", min_lat, max_lat, min_lon, max_lon)    
-    ALIGN_FACTOR = config['general']['align_factor']
-    min_lat = m.floor(min_lat * ALIGN_FACTOR) / ALIGN_FACTOR
-    max_lat = m.ceil (max_lat * ALIGN_FACTOR) / ALIGN_FACTOR
-    min_lon = m.floor(min_lon * ALIGN_FACTOR) / ALIGN_FACTOR
-    max_lon = m.ceil (max_lon * ALIGN_FACTOR) / ALIGN_FACTOR
-    # print("min, max =", min_lat, max_lat, min_lon, max_lon)    
-    # print("diff lat, lon =", max_lat - min_lat, max_lon - min_lon)
-    return [[min_lat,max_lat],[min_lon,max_lon]]
-
+# to convert latitute&longitute to grid indice.
+# min_lat & min_lon is the GPS position for the origin position
 def gps2grid(lat,lon, min_lat, min_lon):
     # lat and lon can be pandas series
     #calculate the distance
@@ -64,7 +49,30 @@ def gps2grid(lat,lon, min_lat, min_lon):
     dx = dx / config['general']['cell_size']
     dy = dy / config['general']['cell_size']      
     return dx.astype('int32'), dy.astype('int32')
-      
+
+# to find a bounding_box of left, bottom, right, top 
+# from the trip dabase
+# the bbox is aligned at inverse of the align_factor
+def find_bbox(df):
+    lat = np.concatenate((df['start_lat'], df['end_lat'])) 
+    lon = np.concatenate((df['start_lon'], df['end_lon']))
+    min_lat = min(lat)
+    max_lat = max(lat)
+    min_lon = min(lon)
+    max_lon = max(lon)
+    # print("find_bbox()")
+    # print("min, max =", min_lat, max_lat, min_lon, max_lon)    
+    factor = config['general']['align_factor']
+    min_lat = m.floor(min_lat * factor) / factor
+    max_lat = m.ceil (max_lat * factor) / factor
+    min_lon = m.floor(min_lon * factor) / factor
+    max_lon = m.ceil (max_lon * factor) / factor
+    # print("min, max =", min_lat, max_lat, min_lon, max_lon)    
+    # print("diff lat, lon =", max_lat - min_lat, max_lon - min_lon)
+    return [[min_lat,max_lat],[min_lon,max_lon]]
+
+# if the time of 24:00 is converted to 00:00 of the next day
+# the Timestamp allows an hour to be in range of 0 to 23 
 def timestamp_rollover(x):
     if "T24:00" in x:
         ts = pd.Timestamp(x.replace("T24:00", "T00:00"))
@@ -72,8 +80,9 @@ def timestamp_rollover(x):
     else:
         ts = pd.Timestamp(x)   
     return ts
-# Open database have have different schema.  
-#  
+
+
+# Open database have have different schema.   
 def formalize(df, kind):
     if kind == "TYPE_PURR":
         df['start_tag'] = df['start_time_utc'].apply(lambda x: pd.Timestamp(x))
@@ -101,15 +110,13 @@ def formalize(df, kind):
 def calculate_time_index(df):
     m = min(df['start_tag'])
     r = max(df['end_tag'])
-    print("date range =", m, r)
     offset = pd.Timestamp(year=m.year, month=m.month, day=m.day, hour=m.hour, tz=m.tzname())
-    print("offset = ", offset)
     delta = df['start_tag'] - offset
     hour = delta.apply(lambda x: x.seconds/3600)
     df['time_slot'] = hour.astype(int)
     return df, offset
 
-
+# to remove a trip data when its distance is too short.  
 def remove_short_distance(df, threshold_distance):
     df['distance'] = df.apply(lambda x: haversine(x['start_lat'], x['start_lon'], x['end_lat'], x['end_lon']),
                               axis=1)    
@@ -194,8 +201,8 @@ def create_trip_db(df):
     
     return odlist
 
-def main(filename):  
-    print("reading %s" % filename)
+def convert_trip_demand(filename):  
+    print("reading [%s]" % filename)
     df = pd.read_csv(filename, sep=',')
     print("Shape after reading \t\t\t\t", df.shape)
          
@@ -212,53 +219,60 @@ def main(filename):
     df = formalize(df, db_type) 
     print("Shape after formalize reading\t\t", df.shape)
     
-    df = remove_short_distance(df, 0.01)    # remove trips less than 0.01km move  
+    df = remove_short_distance(df, config['general']['ignore_distance'])  
     print("Shape after remove short     \t\t", df.shape)
     
-    df = filter_outliers(df, zval=3)    
+    df = filter_outliers(df, zval=config['general']['zvalue'])    
     print("Shape after filter outliers  \t\t", df.shape)
     
     df, offset = calculate_time_index(df)
     print("Shape after calculate time index \t", df.shape)
-
+    print("offset\t\t\t", offset)
     #get list of all lat and longs from start and end groups
-    print("start building grid database")
     bbox = find_bbox(df)            # [[min_lat, max_lat], [min_lon, max_lon]]
+    print("bound-box \t\t", bbox)
     
     df = build_grid_database(df, bbox)
     
-    print("finished grid database")
-      
     trip_db = create_trip_db(df)
         
-    df.to_csv("out.csv", index = False)
+    df.to_csv("out.csv", index = False) 
     
     pkl_name = pathlib.PurePath.joinpath(pathlib.Path(filename).parent, pathlib.Path(filename).stem+'.pkl')
-    
     #
     # todo: to save offset and bbox into the same pickle file
     # done: they are stored as a tuple (4/5/2024)
     #
-    print("write a pickle file as", pkl_name)
+    print("write a pickle file to [%s]" % pkl_name)
     with open(pkl_name, 'wb') as sout:
         pickle.dump((offset, bbox, trip_db), sout, pickle.HIGHEST_PROTOCOL)
     
-    return df
+    return df, offset, bbox
 
-def command_proc():
+def main(filename=None):
     # use this program as command
     # usage: python preproc.py [csvfiles ...]
     #
-    for filename in sys.argv[1:]:
-        main(filename)
+    rval = None
+    if filename is None: 
+        for fn in sys.argv[1:]:
+            rval = convert_trip_demand(fn)
+    else:
+        rval = convert_trip_demand(filename)
+
+    return rval
 
 if __name__ == "__main__":
     config = read_config('escooter.ini')
-    command_proc() 
     
-    # df = main('purr.csv')
-    # df = main('louisville.csv')
-    df = main('kansas.csv')
-    # df = main(r'C:\Users\dskim\Documents\Data\scooter\purr_scooter_data.csv')
-    # df = main(r'C:\Users\dskim\Documents\Data\scooter\lousiville-escooter-2018-2019.csv')
-    # df = main(r'C:\Users\dskim\Documents\Data\scooter\Kansas-Microtransit__Scooter_and_Ebike__Trips.csv')
+    ## calling the main() function with filename for testing purpose
+    ##
+    # df, offset, bbox = main('purr.csv') 
+    df, offset, bbox = main('louisville.csv')
+    # df, offset, bbox = main('kansas.csv')
+    # df, offset, bbox = main(r'C:\Users\dskim\Documents\Data\scooter\purr_scooter_data.csv')
+    # df, offset, bbox = main(r'C:\Users\dskim\Documents\Data\scooter\lousiville-escooter-2018-2019.csv')
+    # df, offset, bbox = main(r'C:\Users\dskim\Documents\Data\scooter\Kansas-Microtransit__Scooter_and_Ebike__Trips.csv')
+    
+    # the empty main() makes it possible to execute this program from command line
+    main()
