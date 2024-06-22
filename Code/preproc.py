@@ -36,7 +36,7 @@ def haversine(lat1, lon1, lat2, lon2):
     a = m.sin(dlat/2)**2 + m.cos(lat1) * m.cos(lat2) * m.sin(dlon/2)**2
     c = 2 * m.atan2(m.sqrt(a), m.sqrt(1-a))
     base = c * EARTH_RADIUS
-    return base
+    return round(base, 2)      # centimeter resolution 
 
 # to convert latitute&longitute to grid indice.
 # min_lat & min_lon is the GPS position for the origin position
@@ -175,23 +175,25 @@ def create_trip_db(df):
     destin = np.zeros((dimx,dimy), dtype=int)     
             
     for i, r in df.iterrows():
-        
         if curr_slot != r['time_slot']:
-            if curr_slot >= 0:
+            # the current grid completes so appends them into total_demand
+            if curr_slot >= 0:        
                 odlist.append([origin, destin, curr_slot])
                 total_demand.append(origin.sum())
                 slot_list.append(curr_slot)
                 
-            curr_slot = r['time_slot']
+            # a new grid creates 
+            curr_slot = r['time_slot']      
             origin = np.zeros((dimx,dimy), dtype=int)
             destin = np.zeros((dimx,dimy), dtype=int)         
-            
+        
+        # accumulates a row intro a grid 
         origin[ r['start_x'], r['start_y']] += 1
         destin[ r['end_x'],   r['end_y']]   += 1
         
     odlist.append([origin, destin, curr_slot])
-    total_demand.append(origin.sum())
-    slot_list.append(curr_slot)
+    total_demand.append(origin.sum()) # save it for plotting (y-axis)
+    slot_list.append(curr_slot)       # save it for plotting (x-axis)
     
     plt.figure()
     plt.title('Total Demand Graph')
@@ -268,11 +270,19 @@ if __name__ == "__main__":
     ## calling the main() function with filename for testing purpose
     ##
     # df, offset, bbox = main('purr.csv') 
-    df, offset, bbox = main('louisville.csv')
+    # df, offset, bbox = main('louisville.csv')
     # df, offset, bbox = main('kansas.csv')
+    
+# notebook    
+    
     # df, offset, bbox = main(r'C:\Users\dskim\Documents\Data\scooter\purr_scooter_data.csv')
     # df, offset, bbox = main(r'C:\Users\dskim\Documents\Data\scooter\lousiville-escooter-2018-2019.csv')
     # df, offset, bbox = main(r'C:\Users\dskim\Documents\Data\scooter\Kansas-Microtransit__Scooter_and_Ebike__Trips.csv')
     
+# office desktop     
+    df, offset, bbox = main(r'/mnt/c/Datasets/MOBILITY/e-scooter-indy/purr_scooter_data.csv')
+    # df, offset, bbox = main(r'/mnt/c/Datasets/MOBILITY/e-scooter-trips/lousiville-escooter-2018-2019.csv')
+    # df, offset, bbox = main(r'/mnt/c/Datasets/MOBILITY/e-scooter-trips/Kansas-Microtransit__Scooter_and_Ebike__Trips.csv')
+
     # the empty main() makes it possible to execute this program from command line
-    main()
+    # main()

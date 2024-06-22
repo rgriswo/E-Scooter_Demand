@@ -111,7 +111,8 @@ class e_scootermodel(nn.Module):
         #Decoder
         self.decode = nn.Sequential(                            #unflatten model
             torch.nn.Unflatten(1, unflatten_dim), 
-            nn.ConvTranspose2d(enc_channels, channel1, dec_kernels, stride=pool_stride, padding=enc_padding, output_padding=output_padding1), # in_channels, out_channels, kernel_size
+            nn.ConvTranspose2d(enc_channels, channel1, dec_kernels, stride=pool_stride, padding=enc_padding, 
+                                output_padding=output_padding1), # in_channels, out_channels, kernel_size
             nn.ReLU(),
             nn.ConvTranspose2d(channel1, in_channels, dec_kernels, stride=pool_stride, padding=enc_padding, output_padding=output_padding2),  # in_channels, out_channels, kernel_size
             torch.nn.Flatten(), #flatten output to be inputed into linear layer
@@ -160,7 +161,7 @@ class e_scootermodel(nn.Module):
         
         
          
-        # input:    batchsizexinputizexgridsizexgridsize
+        # input:    batchsize x inputsize x gridsize x gridsize
         batch_size = x.shape[0]
         window_size = x.shape[1]
         channel_size = x.shape[2]
@@ -476,7 +477,6 @@ class e_scootermodel(nn.Module):
             
         return 
 
-
 def create_heatmap(data, title):
     plt.figure()
     g = sns.heatmap(data, cmap=sns.cubehelix_palette(as_cmap=True))
@@ -484,7 +484,6 @@ def create_heatmap(data, title):
     g.axes.set_ylim(0,max(data.shape))
     plt.savefig(title)
     plt.close()
-
 
 def create_total_demand_chart(pred_data, label_data,  title):
 
@@ -498,7 +497,6 @@ def create_total_demand_chart(pred_data, label_data,  title):
     plt.savefig(title)
     plt.close()
 
-
 def create_loss_chart(xlabel, ylabel, title):
     plt.figure()
     plt.title(title)
@@ -507,7 +505,6 @@ def create_loss_chart(xlabel, ylabel, title):
     plt.plot(xlabel, ylabel)
     plt.savefig(title)
     plt.close()
-    
     
 def read_pickle_file(file):
     #read pick file
@@ -520,9 +517,6 @@ def read_pickle_file(file):
                 break
     #retun pickle data
     return objects[0]
-
-
-
 
 class scooter_Dataset(Dataset):
     def __init__(self, data, data_format):
@@ -592,9 +586,6 @@ class raw_Dataset(Dataset):
         times_features = list(self.data[i][2][0] for i in range(idx, idx+self.window+self.future))
         
         return features, label, times_features
-    
-        
-
     
 def initiate_loader(file, batchsize, window, furure_size, train_size): 
     raw_data = read_pickle_file(file)
